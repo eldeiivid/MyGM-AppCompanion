@@ -1,4 +1,5 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
@@ -17,8 +18,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ManagementHeader } from "../../src/components/ManagementHeader";
-import { useGame } from "../../src/context/GameContext"; // <--- 1. IMPORTAR CONTEXTO
+import DraggableFlatList, {
+  RenderItemParams,
+  ScaleDecorator,
+} from "react-native-draggable-flatlist"; // <--- LIBRERÍA DRAG & DROP
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { useGame } from "../../src/context/GameContext";
 import {
   deletePlannedMatch,
   finalizeWeekWithManualFinances,
@@ -26,32 +32,32 @@ import {
   getCurrentShowCost,
   getGameState,
   getPlannedMatchesForCurrentWeek,
+  reorderMatches,
   resolveMatch,
 } from "../../src/database/operations";
 import { Luchador } from "../../src/types";
 
 export default function ShowScreen() {
   const router = useRouter();
-  const { saveId } = useGame(); // <--- 2. USAR CONTEXTO
+  const { saveId, brandTheme } = useGame();
 
-  // --- DATOS ---
+  // --- DATA ---
   const [matches, setMatches] = useState<any[]>([]);
   const [titles, setTitles] = useState<any[]>([]);
   const [totalShowCost, setTotalShowCost] = useState(0);
   const [currentCash, setCurrentCash] = useState(0);
+  const [currentWeek, setCurrentWeek] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
 
-  // --- MODALES Y ESTADOS ---
+  // --- MODALS & STATE ---
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedMatch, setSelectedMatch] = useState<any>(null);
   const [winnerId, setWinnerId] = useState<number | null>(null);
   const [rating, setRating] = useState(3);
 
-  // Modal de Finanzas
   const [financeModalVisible, setFinanceModalVisible] = useState(false);
   const [costDetailsModalVisible, setCostDetailsModalVisible] = useState(false);
 
-  // ESTADO LIMPIO: Solo ingresos operativos del Show
   const [incomeData, setIncomeData] = useState({
     network: "",
     tickets: "",
@@ -62,13 +68,16 @@ export default function ShowScreen() {
 
   const loadData = useCallback(() => {
     if (!saveId) return;
-
-    // 3. PASAR SAVE_ID A LAS FUNCIONES DE LECTURA
-    setMatches(getPlannedMatchesForCurrentWeek(saveId));
+    // IMPORTANTE: getPlannedMatchesForCurrentWeek YA DEBE VENIR ORDENADO POR sort_order
+    const loadedMatches = getPlannedMatchesForCurrentWeek(saveId);
+    setMatches(loadedMatches);
     setTotalShowCost(getCurrentShowCost(saveId));
     setTitles(getAllTitles(saveId));
     const state: any = getGameState(saveId);
-    if (state) setCurrentCash(state.currentCash);
+    if (state) {
+      setCurrentCash(state.currentCash);
+      setCurrentWeek(state.currentWeek);
+    }
   }, [saveId]);
 
   useFocusEffect(loadData);
@@ -79,16 +88,23 @@ export default function ShowScreen() {
     setTimeout(() => setRefreshing(false), 500);
   }, [loadData]);
 
-  // Usamos !!m.isCompleted para que funcione con 1 o true.
+  // --- DRAG END HANDLER ---
+  const onDragEnd = ({ data }: { data: any[] }) => {
+    setMatches(data); // Actualizamos la UI inmediatamente
+    if (saveId) {
+      reorderMatches(saveId, data); // Guardamos el nuevo orden en DB
+    }
+  };
+
   const allMatchesCompleted =
     matches.length > 0 && matches.every((m) => !!m.isCompleted);
 
-  // --- LÓGICA DE NEGOCIO ---
+  // --- BUSINESS LOGIC ---
   const handleDelete = (id: number) => {
-    Alert.alert("Eliminar", "¿Borrar evento?", [
-      { text: "Cancelar", style: "cancel" },
+    Alert.alert("Delete Segment", "Remove this segment from the card?", [
+      { text: "Cancel", style: "cancel" },
       {
-        text: "Borrar",
+        text: "Delete",
         style: "destructive",
         onPress: () => {
           deletePlannedMatch(id);
@@ -115,9 +131,8 @@ export default function ShowScreen() {
 
   const handleFinalizeMatch = () => {
     if (!saveId) return;
-    if (!winnerId) return Alert.alert("Error", "Selecciona un ganador.");
+    if (!winnerId) return Alert.alert("Error", "Please select a winner.");
 
-    // 4. PASAR SAVE_ID A RESOLVE MATCH
     const result = resolveMatch(
       saveId,
       selectedMatch.id,
@@ -128,28 +143,20 @@ export default function ShowScreen() {
 
     if (result.success) {
       setModalVisible(false);
-
-      // RECARGAMOS DATOS INMEDIATAMENTE
       loadData();
-
-      let msg = `${rating} Estrellas registradas.`;
-      if (result.isTitleChange) msg += "\n\n🏆 ¡TENEMOS NUEVO CAMPEÓN!";
-      else if (selectedMatch.isTitleMatch) msg += "\n\n🔰 ¡Defensa Exitosa!";
-
+      let msg = `${rating} Stars recorded.`;
+      if (result.isTitleChange) msg += "\n\n🏆 NEW CHAMPION CROWNED!";
       setTimeout(() => {
-        Alert.alert("Combate Finalizado", msg);
+        Alert.alert("Match Finalized", msg);
       }, 300);
     } else {
-      Alert.alert(
-        "Error",
-        "No se pudo guardar el resultado. Revisa la consola."
-      );
+      Alert.alert("Error", "Could not save match result.");
     }
   };
 
   const handleFinishShow = () => {
     if (!allMatchesCompleted) {
-      Alert.alert("Show Incompleto", "Aún tienes combates sin simular.");
+      Alert.alert("Show Incomplete", "You still have pending matches.");
       return;
     }
     setIncomeData({
@@ -171,27 +178,25 @@ export default function ShowScreen() {
 
   const submitWeekClose = () => {
     if (!saveId) return;
-
     const total = calculateTotalIncome();
     Alert.alert(
-      "Cerrar Caja",
-      `Ingresos del Show: $${total.toLocaleString()}\n¿Avanzar a la siguiente semana?`,
+      "Close Week",
+      `Total Revenue: $${total.toLocaleString()}\nProceed to next week?`,
       [
-        { text: "Cancelar", style: "cancel" },
+        { text: "Cancel", style: "cancel" },
         {
-          text: "Confirmar y Avanzar",
+          text: "Confirm & Advance",
           onPress: () => {
-            // 5. PASAR SAVE_ID AL CIERRE DE SEMANA
             const success = finalizeWeekWithManualFinances(saveId, incomeData);
             if (success) {
               setFinanceModalVisible(false);
               loadData();
               Alert.alert(
-                "¡Semana Completada!",
-                "Tus finanzas y contratos han sido actualizados."
+                "Week Complete!",
+                "Finances recorded. Calendar advanced."
               );
             } else {
-              Alert.alert("Error", "No se pudo cerrar la semana.");
+              Alert.alert("Error", "Could not close the week.");
             }
           },
         },
@@ -199,15 +204,21 @@ export default function ShowScreen() {
     );
   };
 
-  // --- HELPERS VISUALES ---
+  // --- HELPERS ---
   const getParticipantsList = () => {
     if (!selectedMatch) return [];
     const list: Luchador[] = [];
-    if (selectedMatch.participants) {
-      Object.values(selectedMatch.participants).forEach((team: any) =>
-        list.push(...team)
-      );
-    }
+    try {
+      const participants =
+        typeof selectedMatch.participants === "string"
+          ? JSON.parse(selectedMatch.participants)
+          : selectedMatch.participants;
+      if (participants) {
+        Object.values(participants).forEach((team: any) => {
+          if (Array.isArray(team)) list.push(...team);
+        });
+      }
+    } catch (e) {}
     return list;
   };
 
@@ -217,6 +228,7 @@ export default function ShowScreen() {
   ) => {
     if (!team || team.length === 0)
       return <Text style={styles.textUnknown}>???</Text>;
+
     if (team.length === 1) {
       const p = team[0];
       return (
@@ -246,11 +258,29 @@ export default function ShowScreen() {
     return (
       <View
         style={[
+          styles.participantBox,
           align === "right" && { alignItems: "flex-end" },
           align === "center" && { alignItems: "center" },
         ]}
       >
-        <Text style={styles.participantNameSmall}>
+        <View style={styles.multiAvatarContainer}>
+          {team.slice(0, 2).map((p, idx) => (
+            <View
+              key={p.id}
+              style={[styles.miniAvatar, { marginLeft: idx > 0 ? -15 : 0 }]}
+            >
+              {p.imageUri ? (
+                <Image
+                  source={{ uri: p.imageUri }}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              ) : (
+                <View style={{ backgroundColor: "#333", flex: 1 }} />
+              )}
+            </View>
+          ))}
+        </View>
+        <Text style={styles.participantName} numberOfLines={1}>
           {team.map((p) => p.name).join(" & ")}
         </Text>
       </View>
@@ -259,230 +289,291 @@ export default function ShowScreen() {
 
   const getTitleName = (titleId: number) => {
     const t = titles.find((t) => t.id === titleId);
-    return t ? t.name : "Campeonato";
+    return t ? t.name : "Championship";
+  };
+
+  // --- RENDER ITEM (DRAGGABLE) ---
+  const renderItem = ({
+    item: match,
+    drag,
+    isActive,
+  }: RenderItemParams<any>) => {
+    const isCompleted = !!match.isCompleted;
+    const isPromo = match.matchType.startsWith("Promo:");
+    const isTitle = !!match.isTitleMatch;
+
+    let teamA = [];
+    let teamB = [];
+    try {
+      const pData =
+        typeof match.participants === "string"
+          ? JSON.parse(match.participants)
+          : match.participants;
+      teamA = pData?.["0"] || [];
+      teamB = pData?.["1"] || [];
+    } catch (e) {}
+
+    let accentColor = isPromo ? "#D946EF" : isTitle ? "#F59E0B" : "#3B82F6";
+
+    return (
+      <ScaleDecorator>
+        <TouchableOpacity
+          onLongPress={drag}
+          disabled={isActive || isCompleted}
+          activeOpacity={1}
+          style={[
+            styles.timelineItem,
+            isActive && { opacity: 0.8, transform: [{ scale: 1.02 }] },
+          ]}
+        >
+          {/* Timeline Left (With Grip) */}
+          <View style={styles.timelineLeft}>
+            {!isCompleted && (
+              <View style={styles.gripContainer}>
+                <MaterialCommunityIcons
+                  name="drag-horizontal"
+                  size={20}
+                  color="#64748B"
+                />
+              </View>
+            )}
+            <View
+              style={[
+                styles.line,
+                { backgroundColor: isActive ? accentColor : "#334155" },
+              ]}
+            />
+          </View>
+
+          {/* Card Content */}
+          <BlurView
+            intensity={20}
+            tint="dark"
+            style={[
+              styles.matchCard,
+              isCompleted && { borderColor: "rgba(255,255,255,0.05)" },
+            ]}
+          >
+            <View style={styles.cardHeader}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              >
+                <View
+                  style={[
+                    styles.typeBadge,
+                    { backgroundColor: accentColor + "30" },
+                  ]}
+                >
+                  <Text style={[styles.typeText, { color: accentColor }]}>
+                    {isPromo ? "SEGMENT" : match.matchType.toUpperCase()}
+                  </Text>
+                </View>
+                {isTitle && (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <Ionicons name="trophy" size={12} color="#F59E0B" />
+                    <Text
+                      style={{
+                        color: "#F59E0B",
+                        fontSize: 10,
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {getTitleName(match.titleId)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              {isCompleted && (
+                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+              )}
+            </View>
+
+            <View style={styles.facesRow}>
+              {getTeamComponent(teamA, teamB.length > 0 ? "left" : "center")}
+              {teamB.length > 0 && <Text style={styles.vsText}>VS</Text>}
+              {teamB.length > 0 && getTeamComponent(teamB, "right")}
+            </View>
+
+            {isCompleted ? (
+              <View style={styles.resultBox}>
+                <View>
+                  <Text style={styles.resultLabel}>WINNER</Text>
+                  <Text style={styles.resultValue}>
+                    {match.resultText
+                      ? match.resultText.replace("Ganador: ", "").split(" (")[0]
+                      : "N/A"}
+                  </Text>
+                </View>
+                <View style={styles.ratingBadge}>
+                  <Ionicons name="star" size={12} color="#F59E0B" />
+                  <Text style={styles.ratingText}>{match.rating || 0}</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={styles.iconBtn}
+                  onPress={() => handleEdit(match)}
+                >
+                  <Ionicons name="pencil" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.playBtn, { backgroundColor: accentColor }]}
+                  onPress={() => openResultModal(match)}
+                >
+                  <Ionicons name="play" size={14} color="#FFF" />
+                  <Text style={styles.playBtnText}>PLAY</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconBtn}
+                  onPress={() => handleDelete(match.id)}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </BlurView>
+        </TouchableOpacity>
+      </ScaleDecorator>
+    );
   };
 
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="light-content" />
 
-      <ManagementHeader />
+      <View style={[styles.absoluteFill, { backgroundColor: "#000" }]} />
+      <LinearGradient
+        colors={[brandTheme || "#EF4444", "transparent"]}
+        style={[styles.absoluteFill, { height: "40%", opacity: 0.3 }]}
+      />
 
-      <View style={styles.pageHeader}>
-        <View>
-          <Text style={styles.headerTitle}>Cartelera</Text>
-          <Text style={styles.headerSubtitle}>
-            {matches.length} segmentos programados
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={styles.costBadge}
-          onPress={() => setCostDetailsModalVisible(true)}
-        >
-          <Text style={styles.costLabel}>COSTO SHOW</Text>
-          <Text style={styles.costValue}>
-            -${totalShowCost.toLocaleString()}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#333"
-          />
-        }
-      >
-        {matches.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="calendar-outline" size={64} color="#CBD5E1" />
-            <Text style={styles.emptyText}>Cartelera Vacía</Text>
-            <Text style={styles.emptySubText}>
-              Ve al Planner (+) para armar tu show.
-            </Text>
+      <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.headerTitle}>TONIGHT'S SHOW</Text>
+            <Text style={styles.headerSub}>Week {currentWeek}</Text>
           </View>
-        ) : (
-          matches.map((match, index) => {
-            const isCompleted = !!match.isCompleted;
-            const isPromo = match.matchType.startsWith("Promo:");
-            const isTitle = !!match.isTitleMatch;
-
-            const teamA = match.participants ? match.participants["0"] : [];
-            const teamB = match.participants ? match.participants["1"] : [];
-
-            let accentColor = isPromo
-              ? "#9C27B0"
-              : isTitle
-              ? "#FFB300"
-              : "#3B82F6";
-
-            return (
-              <View
-                key={index}
-                style={[
-                  styles.matchCard,
-                  isCompleted && styles.matchCardCompleted,
-                ]}
-              >
-                <View
-                  style={[styles.colorStrip, { backgroundColor: accentColor }]}
-                />
-                <View style={styles.matchContent}>
-                  <View style={styles.cardHeader}>
-                    <View style={styles.matchTypeWrapper}>
-                      <Text
-                        style={[styles.matchTypeText, { color: accentColor }]}
-                      >
-                        {isPromo ? "SEGMENTO" : match.matchType.toUpperCase()}
-                      </Text>
-                      {isTitle && (
-                        <Text style={styles.titleText}>
-                          🏆 {getTitleName(match.titleId)}
-                        </Text>
-                      )}
-                    </View>
-                    {isCompleted && (
-                      <View style={styles.completedTag}>
-                        <Ionicons
-                          name="checkmark-circle"
-                          size={14}
-                          color="#10B981"
-                        />
-                        <Text style={styles.completedTagText}>FINALIZADO</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={styles.facesRow}>
-                    {getTeamComponent(
-                      teamA,
-                      teamB && teamB.length > 0 ? "left" : "center"
-                    )}
-                    {teamB && teamB.length > 0 && (
-                      <View style={styles.vsCircle}>
-                        <Text style={styles.vsText}>VS</Text>
-                      </View>
-                    )}
-                    {teamB &&
-                      teamB.length > 0 &&
-                      getTeamComponent(teamB, "right")}
-                  </View>
-
-                  {/* RESULTADO */}
-                  {isCompleted ? (
-                    <View style={styles.resultBox}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.resultLabel}>GANADOR:</Text>
-                        <Text style={styles.resultWinner}>
-                          {match.resultText
-                            ? match.resultText.includes("Ganador: ")
-                              ? match.resultText
-                                  .replace("Ganador: ", "")
-                                  .split(" (")[0]
-                              : match.resultText
-                            : "N/A"}
-                        </Text>
-                      </View>
-                      <View style={styles.starsBadge}>
-                        <Ionicons name="star" size={12} color="#F59E0B" />
-                        <Text style={styles.starsText}>
-                          {match.rating || 0}
-                        </Text>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={styles.actionsRow}>
-                      <TouchableOpacity
-                        style={styles.iconAction}
-                        onPress={() => handleEdit(match)}
-                      >
-                        <Ionicons name="pencil" size={18} color="#64748B" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.playAction,
-                          { backgroundColor: accentColor },
-                        ]}
-                        onPress={() => openResultModal(match)}
-                      >
-                        <Ionicons name="play" size={16} color="white" />
-                        <Text style={styles.playText}>SIMULAR</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.iconAction}
-                        onPress={() => handleDelete(match.id)}
-                      >
-                        <Ionicons
-                          name="trash-outline"
-                          size={18}
-                          color="#EF4444"
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              </View>
-            );
-          })
-        )}
-      </ScrollView>
-
-      {/* FAB / FOOTER */}
-      {matches.length > 0 && allMatchesCompleted ? (
-        <View style={styles.floatingFooter}>
-          <TouchableOpacity style={styles.finishBtn} onPress={handleFinishShow}>
-            <LinearGradient
-              colors={["#1E293B", "#334155"]}
-              style={styles.finishGradient}
-            >
-              <Text style={styles.finishText}>CERRAR SEMANA</Text>
-              <Ionicons name="arrow-forward" size={20} color="white" />
-            </LinearGradient>
+          <TouchableOpacity
+            onPress={() => setCostDetailsModalVisible(true)}
+            style={styles.costBadge}
+          >
+            <Text style={styles.costLabel}>COST</Text>
+            <Text style={styles.costValue}>
+              ${totalShowCost.toLocaleString()}
+            </Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => router.push("/planner")}
-        >
-          <LinearGradient
-            colors={["#3B82F6", "#2563EB"]}
-            style={styles.fabGradient}
+
+        {matches.length === 0 ? (
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="#FFF"
+              />
+            }
           >
-            <Ionicons name="add" size={32} color="white" />
-          </LinearGradient>
-        </TouchableOpacity>
-      )}
+            <View style={styles.emptyState}>
+              <Ionicons
+                name="calendar-outline"
+                size={60}
+                color="rgba(255,255,255,0.2)"
+              />
+              <Text style={styles.emptyText}>Empty Card</Text>
+              <Text style={styles.emptySub}>
+                Head to the Planner (+) to book matches.
+              </Text>
+            </View>
+          </ScrollView>
+        ) : (
+          <DraggableFlatList
+            data={matches}
+            onDragEnd={onDragEnd}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={renderItem}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="#FFF"
+              />
+            }
+          />
+        )}
 
-      {/* --- MODALES (RESULTADOS, FINANZAS, COSTOS) --- */}
+        {/* Footer Actions */}
+        {matches.length > 0 && allMatchesCompleted ? (
+          <View style={styles.footerContainer}>
+            <TouchableOpacity
+              style={styles.finishBtn}
+              onPress={handleFinishShow}
+            >
+              <LinearGradient
+                colors={[brandTheme || "#10B981", "#065F46"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.finishGradient}
+              >
+                <Text style={styles.finishText}>FINISH SHOW</Text>
+                <Ionicons name="arrow-forward" size={20} color="#FFF" />
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.fab}
+            onPress={() => router.push("/planner")}
+          >
+            <LinearGradient
+              colors={[brandTheme || "#3B82F6", "#1E293B"]}
+              style={styles.fabGradient}
+            >
+              <Ionicons name="add" size={30} color="white" />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+      </SafeAreaView>
 
-      {/* 1. RESULTADOS */}
-      <Modal visible={modalVisible} animationType="slide" transparent={true}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>Resultados</Text>
+      {/* --- RESULT MODAL --- */}
+      <Modal visible={modalVisible} animationType="fade" transparent={true}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          <BlurView intensity={95} tint="dark" style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Match Result</Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Ionicons name="close-circle" size={28} color="#CBD5E1" />
+                <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.sectionLabel}>GANADOR</Text>
+            <Text style={styles.inputLabel}>SELECT WINNER</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.winnerScroll}
+              contentContainerStyle={{ gap: 10, paddingBottom: 20 }}
             >
               {getParticipantsList().map((p) => (
                 <TouchableOpacity
                   key={p.id}
                   style={[
                     styles.winnerCard,
-                    winnerId === p.id && styles.winnerCardActive,
+                    winnerId === p.id && {
+                      borderColor: brandTheme,
+                      backgroundColor: brandTheme + "20",
+                    },
                   ]}
                   onPress={() => setWinnerId(p.id)}
                 >
@@ -493,330 +584,291 @@ export default function ShowScreen() {
                     />
                   ) : (
                     <View style={styles.winnerPlaceholder}>
-                      <Text style={{ fontWeight: "bold", color: "#94A3B8" }}>
-                        {p.name.charAt(0)}
-                      </Text>
+                      <Text style={{ color: "#FFF" }}>{p.name.charAt(0)}</Text>
                     </View>
                   )}
                   <Text
+                    numberOfLines={1}
                     style={[
                       styles.winnerName,
-                      winnerId === p.id && {
-                        color: "#3B82F6",
-                        fontWeight: "bold",
-                      },
+                      winnerId === p.id && { color: brandTheme },
                     ]}
-                    numberOfLines={1}
                   >
                     {p.name}
                   </Text>
                   {winnerId === p.id && (
                     <Ionicons
                       name="checkmark-circle"
-                      size={20}
-                      color="#3B82F6"
-                      style={styles.checkIcon}
+                      size={18}
+                      color={brandTheme}
+                      style={{ position: "absolute", top: 5, right: 5 }}
                     />
                   )}
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <Text style={styles.sectionLabel}>CALIFICACIÓN</Text>
-            <View style={styles.starsContainer}>
+            <Text style={styles.inputLabel}>MATCH RATING</Text>
+            <View style={styles.starsRow}>
               {[1, 2, 3, 4, 5].map((star) => (
                 <TouchableOpacity key={star} onPress={() => setRating(star)}>
                   <Ionicons
                     name={rating >= star ? "star" : "star-outline"}
-                    size={36}
+                    size={32}
                     color="#F59E0B"
                   />
                 </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity
-              style={[styles.confirmBtn, !winnerId && { opacity: 0.5 }]}
+              style={[
+                styles.confirmBtn,
+                { backgroundColor: brandTheme },
+                !winnerId && { opacity: 0.5 },
+              ]}
               disabled={!winnerId}
               onPress={handleFinalizeMatch}
             >
-              <Text style={styles.confirmText}>CONFIRMAR</Text>
+              <Text style={styles.confirmText}>CONFIRM RESULT</Text>
             </TouchableOpacity>
-          </View>
-        </View>
+          </BlurView>
+        </KeyboardAvoidingView>
       </Modal>
 
-      {/* 2. FINANZAS (CIERRE) - VERSIÓN LIMPIA */}
-      <Modal
-        visible={financeModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={{ flex: 1 }}
-        >
-          <View style={styles.fullScreenModal}>
-            <View style={styles.fsHeader}>
-              <Text style={styles.fsTitle}>Cierre de Caja</Text>
-              <TouchableOpacity onPress={() => setFinanceModalVisible(false)}>
-                <Text
-                  style={{ color: "#3B82F6", fontSize: 16, fontWeight: "600" }}
-                >
-                  Cancelar
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={{ padding: 20 }}
-            >
-              <Text style={styles.fsSubtitle}>
-                Ingresa los resultados económicos del show.
+      {/* --- FINANCE MODAL (FULL) --- */}
+      <Modal visible={financeModalVisible} animationType="slide">
+        <View style={styles.fullScreenModal}>
+          <View style={styles.fsHeader}>
+            <Text style={styles.fsTitle}>Post-Show Finances</Text>
+            <TouchableOpacity onPress={() => setFinanceModalVisible(false)}>
+              <Text style={{ color: "#EF4444", fontWeight: "bold" }}>
+                Cancel
               </Text>
-
-              <View style={styles.inputContainer}>
+            </TouchableOpacity>
+          </View>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={{ flex: 1 }}
+          >
+            <ScrollView contentContainerStyle={{ padding: 20 }}>
+              <Text style={styles.fsSub}>Enter revenue generated.</Text>
+              <View style={styles.inputBox}>
                 <Text style={styles.inputLabel}>📡 Network / TV Rights</Text>
                 <TextInput
-                  style={styles.inputField}
+                  style={styles.fsInput}
                   keyboardType="numeric"
                   placeholder="$0"
+                  placeholderTextColor="#64748B"
                   value={incomeData.network}
                   onChangeText={(t) =>
                     setIncomeData({ ...incomeData, network: t })
                   }
                 />
               </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>
-                  🎟️ Entradas (Ticket Sales)
-                </Text>
+              <View style={styles.inputBox}>
+                <Text style={styles.inputLabel}>🎟️ Ticket Sales</Text>
                 <TextInput
-                  style={styles.inputField}
+                  style={styles.fsInput}
                   keyboardType="numeric"
                   placeholder="$0"
+                  placeholderTextColor="#64748B"
                   value={incomeData.tickets}
                   onChangeText={(t) =>
                     setIncomeData({ ...incomeData, tickets: t })
                   }
                 />
               </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>📢 Publicidad (Ads)</Text>
+              <View style={styles.inputBox}>
+                <Text style={styles.inputLabel}>📢 Advertising</Text>
                 <TextInput
-                  style={styles.inputField}
+                  style={styles.fsInput}
                   keyboardType="numeric"
                   placeholder="$0"
+                  placeholderTextColor="#64748B"
                   value={incomeData.ads}
                   onChangeText={(t) => setIncomeData({ ...incomeData, ads: t })}
                 />
               </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>
-                  👕 Merchandising (In-Venue)
-                </Text>
+              <View style={styles.inputBox}>
+                <Text style={styles.inputLabel}>👕 Merchandise / Promos</Text>
                 <TextInput
-                  style={styles.inputField}
+                  style={styles.fsInput}
                   keyboardType="numeric"
                   placeholder="$0"
+                  placeholderTextColor="#64748B"
                   value={incomeData.promos}
                   onChangeText={(t) =>
                     setIncomeData({ ...incomeData, promos: t })
                   }
                 />
               </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>💎 Otros Ingresos</Text>
+              <View style={styles.inputBox}>
+                <Text style={styles.inputLabel}>📦 Other Revenue</Text>
                 <TextInput
-                  style={styles.inputField}
+                  style={styles.fsInput}
                   keyboardType="numeric"
                   placeholder="$0"
+                  placeholderTextColor="#64748B"
                   value={incomeData.others}
                   onChangeText={(t) =>
                     setIncomeData({ ...incomeData, others: t })
                   }
                 />
               </View>
-
-              <View style={styles.summaryBox}>
-                <Text style={styles.summaryLabel}>TOTAL RECAUDADO</Text>
-                <Text style={styles.summaryValue}>
+              <View style={styles.totalBox}>
+                <Text style={{ color: "#94A3B8", fontWeight: "bold" }}>
+                  TOTAL REVENUE
+                </Text>
+                <Text
+                  style={{ color: "#10B981", fontSize: 24, fontWeight: "900" }}
+                >
                   ${calculateTotalIncome().toLocaleString()}
                 </Text>
               </View>
-            </ScrollView>
-
-            <View style={styles.fsFooter}>
               <TouchableOpacity
-                style={styles.fsConfirmBtn}
+                style={[
+                  styles.confirmBtn,
+                  {
+                    backgroundColor: "#10B981",
+                    marginTop: 20,
+                    marginBottom: 40,
+                  },
+                ]}
                 onPress={submitWeekClose}
               >
-                <Text style={styles.fsConfirmText}>
-                  FINALIZAR Y AVANZAR SEMANA
-                </Text>
+                <Text style={styles.confirmText}>FINALIZE WEEK</Text>
               </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
 
-      {/* 3. DETALLES DE COSTO */}
+      {/* --- COST DETAILS MODAL (NUEVO Y ARREGLADO) --- */}
       <Modal
         visible={costDetailsModalVisible}
-        animationType="fade"
+        animationType="slide"
         transparent={true}
         onRequestClose={() => setCostDetailsModalVisible(false)}
       >
-        <View style={styles.costModalOverlay}>
-          <View style={styles.costModalContent}>
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>Desglose de Gastos</Text>
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={95} tint="dark" style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Production Costs</Text>
               <TouchableOpacity
                 onPress={() => setCostDetailsModalVisible(false)}
               >
-                <Ionicons name="close" size={24} color="#64748B" />
+                <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={{ maxHeight: 400 }}>
-              {matches.length === 0 ? (
+              {matches.map((m, idx) => {
+                const isPromo = m.matchType.startsWith("Promo");
+                // Costos simulados simples basados en tus datos
+                // Stipulation cost suele venir en m.cost (en DB)
+                if (m.cost > 0) {
+                  return (
+                    <View key={idx} style={styles.costItem}>
+                      <View>
+                        <Text style={styles.costMatchName}>
+                          {isPromo ? "Segment" : m.matchType}
+                        </Text>
+                        <Text style={styles.costDetail}>{m.stipulation}</Text>
+                      </View>
+                      <Text style={styles.costAmount}>
+                        -${m.cost.toLocaleString()}
+                      </Text>
+                    </View>
+                  );
+                }
+                return null;
+              })}
+              {matches.filter((m) => m.cost > 0).length === 0 && (
                 <Text
                   style={{
+                    color: "#64748B",
                     textAlign: "center",
-                    color: "#94A3B8",
-                    marginTop: 20,
+                    marginVertical: 20,
                   }}
                 >
-                  No hay gastos registrados.
+                  No extra production costs for this show.
                 </Text>
-              ) : (
-                matches.map((m, i) => (
-                  <View key={i} style={styles.costItem}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.costItemTitle}>{m.matchType}</Text>
-                      <Text style={styles.costItemSub}>{m.stipulation}</Text>
-                    </View>
-                    <Text style={styles.costItemValue}>
-                      -${m.cost.toLocaleString()}
-                    </Text>
-                  </View>
-                ))
               )}
             </ScrollView>
 
             <View style={styles.costTotalRow}>
-              <Text style={styles.costTotalLabel}>TOTAL SHOW</Text>
+              <Text style={styles.costTotalLabel}>TOTAL SHOW COST</Text>
               <Text style={styles.costTotalValue}>
                 -${totalShowCost.toLocaleString()}
               </Text>
             </View>
-          </View>
+          </BlurView>
         </View>
       </Modal>
     </View>
   );
 }
 
-// ... LOS ESTILOS SE MANTIENEN IGUAL ...
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F7FA" },
+  container: { flex: 1, backgroundColor: "#000" },
+  absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
-  // HEADER
-  pageHeader: {
+  header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: "#F5F7FA",
+    padding: 20,
+    marginBottom: 10,
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#1E293B",
-    letterSpacing: -0.5,
-  },
-  headerSubtitle: { fontSize: 13, color: "#64748B", fontWeight: "600" },
-
+  headerTitle: { fontSize: 28, fontWeight: "900", color: "#FFF" },
+  headerSub: { color: "#94A3B8", fontWeight: "600" },
   costBadge: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(255,255,255,0.1)",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    borderRadius: 12,
   },
-  costLabel: {
-    fontSize: 9,
-    color: "#94A3B8",
-    fontWeight: "bold",
-    textAlign: "right",
-    marginBottom: 2,
+  costLabel: { fontSize: 10, color: "#94A3B8", fontWeight: "bold" },
+  costValue: { fontSize: 14, color: "#EF4444", fontWeight: "bold" },
+
+  scrollContent: { padding: 20, paddingBottom: 150 },
+
+  // TIMELINE (UPDATED FOR DRAG)
+  timelineItem: { flexDirection: "row", marginBottom: 5 },
+  timelineLeft: { width: 30, alignItems: "center", justifyContent: "center" },
+  gripContainer: { padding: 5 },
+  line: {
+    width: 2,
+    flex: 1,
+    backgroundColor: "#334155",
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    zIndex: -1,
   },
-  costValue: { fontSize: 13, color: "#EF4444", fontWeight: "bold" },
-
-  scrollContent: { padding: 20, paddingBottom: 100 },
-
-  emptyState: { alignItems: "center", marginTop: 80 },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#1E293B",
-    marginTop: 15,
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: 20,
+    marginBottom: 5,
   },
-  emptySubText: { fontSize: 14, color: "#94A3B8", marginTop: 5 },
 
-  // MATCH CARD
   matchCard: {
-    backgroundColor: "white",
+    flex: 1,
+    marginBottom: 15,
     borderRadius: 16,
-    marginBottom: 12,
-    flexDirection: "row",
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
-  matchCardCompleted: { opacity: 0.7 },
-  colorStrip: { width: 5, height: "100%" },
-  matchContent: { flex: 1, padding: 14 },
-
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 10,
   },
-  matchTypeWrapper: { flexDirection: "column" },
-  matchTypeText: { fontSize: 11, fontWeight: "900", letterSpacing: 0.5 },
-  titleText: {
-    fontSize: 10,
-    color: "#B45309",
-    fontWeight: "700",
-    marginTop: 2,
-  },
-  completedTag: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#ECFDF5",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  completedTagText: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#10B981",
-    marginLeft: 4,
-  },
+  typeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  typeText: { fontSize: 10, fontWeight: "900" },
 
   facesRow: {
     flexDirection: "row",
@@ -824,281 +876,242 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 15,
   },
-  participantBox: { width: 75 },
+  participantBox: { alignItems: "center", maxWidth: 100 },
   participantAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    marginBottom: 6,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginBottom: 5,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
   participantAvatarPlaceholder: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#F1F5F9",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#333",
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 6,
+    marginBottom: 5,
   },
-  avatarInitial: { fontSize: 18, fontWeight: "bold", color: "#94A3B8" },
-  participantName: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#334155",
-    textAlign: "center",
-  },
-  participantNameSmall: { fontSize: 11, fontWeight: "700", color: "#334155" },
+  avatarInitial: { color: "#FFF", fontWeight: "bold" },
+  participantName: { color: "#E2E8F0", fontSize: 11, fontWeight: "700" },
   textUnknown: {
-    color: "#94A3B8",
+    color: "rgba(255,255,255,0.3)",
     fontSize: 12,
     fontWeight: "bold",
     fontStyle: "italic",
+    textAlign: "center",
+  },
+  multiAvatarContainer: { flexDirection: "row", marginBottom: 5 },
+  miniAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#000",
+  },
+  vsText: {
+    color: "#64748B",
+    fontWeight: "900",
+    fontStyle: "italic",
+    fontSize: 12,
   },
 
-  vsCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: "#F1F5F9",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  vsText: { fontSize: 9, fontWeight: "900", color: "#94A3B8" },
-
-  actionsRow: {
+  // ACTIONS / RESULT
+  actionRow: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    alignItems: "center",
-    gap: 8,
+    gap: 10,
     borderTopWidth: 1,
-    borderTopColor: "#F8FAFC",
+    borderTopColor: "rgba(255,255,255,0.05)",
     paddingTop: 10,
   },
-  playAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+  iconBtn: {
+    padding: 8,
+    backgroundColor: "rgba(255,255,255,0.05)",
     borderRadius: 20,
   },
-  playText: { color: "white", fontWeight: "bold", fontSize: 11, marginLeft: 4 },
-  iconAction: { padding: 7, backgroundColor: "#F1F5F9", borderRadius: 20 },
+  playBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 4,
+  },
+  playBtnText: { color: "#FFF", fontWeight: "bold", fontSize: 12 },
 
   resultBox: {
-    borderTopWidth: 1,
-    borderTopColor: "#F8FAFC",
-    paddingTop: 10,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.05)",
+    paddingTop: 10,
   },
-  resultLabel: {
-    fontSize: 11,
-    color: "#94A3B8",
-    fontWeight: "bold",
-    marginRight: 5,
-  },
-  resultWinner: { fontSize: 11, color: "#1E293B", fontWeight: "bold" },
-
-  starsBadge: {
+  resultLabel: { color: "#64748B", fontSize: 10, fontWeight: "bold" },
+  resultValue: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
+  ratingBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFBEB",
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#FCD34D",
+    gap: 4,
   },
-  starsText: {
-    fontSize: 11,
-    fontWeight: "bold",
-    color: "#B45309",
-    marginLeft: 4,
-  },
+  ratingText: { color: "#F59E0B", fontWeight: "bold" },
 
-  // FOOTER & FAB
-  floatingFooter: {
+  // FOOTER
+  footerContainer: {
     position: "absolute",
-    bottom: 140,
-    alignSelf: "center",
-    zIndex: 50,
+    bottom: 110,
+    width: "100%",
+    alignItems: "center",
+    zIndex: 10,
   },
   finishBtn: {
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.5,
     shadowRadius: 8,
-    elevation: 5,
   },
   finishGradient: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 24,
-    paddingVertical: 14,
+    paddingHorizontal: 30,
+    paddingVertical: 15,
     borderRadius: 30,
     gap: 10,
+    alignItems: "center",
   },
-  finishText: { color: "white", fontWeight: "bold", fontSize: 14 },
+  finishText: { color: "#FFF", fontWeight: "900", fontSize: 16 },
 
-  fab: { position: "absolute", right: 20, bottom: 110, zIndex: 50 },
+  fab: { position: "absolute", bottom: 120, right: 20 },
   fabGradient: {
     width: 56,
     height: 56,
     borderRadius: 28,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#3B82F6",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 5,
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
   },
 
-  // MODAL RESULTADOS
+  // EMPTY
+  emptyState: { alignItems: "center", marginTop: 100 },
+  emptyText: { color: "#FFF", fontWeight: "bold", fontSize: 18, marginTop: 10 },
+  emptySub: { color: "#94A3B8" },
+
+  // MODALS
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
     justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.8)",
   },
   modalContent: {
-    backgroundColor: "white",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
     paddingBottom: 40,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  modalHeaderRow: {
+  modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
     marginBottom: 20,
   },
-  modalTitle: { fontSize: 18, fontWeight: "800", color: "#1E293B" },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "700",
+  modalTitle: { color: "#FFF", fontSize: 20, fontWeight: "800" },
+  inputLabel: {
     color: "#94A3B8",
+    fontSize: 11,
+    fontWeight: "bold",
     marginBottom: 10,
     marginTop: 10,
   },
-  winnerScroll: { gap: 10, paddingBottom: 10 },
   winnerCard: {
+    width: 80,
     alignItems: "center",
-    padding: 8,
+    padding: 10,
     borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#F1F5F9",
-    width: 75,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  winnerCardActive: { borderColor: "#3B82F6", backgroundColor: "#EFF6FF" },
-  winnerImg: { width: 44, height: 44, borderRadius: 22, marginBottom: 5 },
+  winnerImg: { width: 50, height: 50, borderRadius: 25, marginBottom: 5 },
   winnerPlaceholder: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#E2E8F0",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#333",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 5,
   },
-  winnerName: { fontSize: 10, color: "#64748B", textAlign: "center" },
-  checkIcon: { position: "absolute", top: 5, right: 5 },
-  starsContainer: {
+  winnerName: { color: "#CBD5E1", fontSize: 10, fontWeight: "bold" },
+  starsRow: {
     flexDirection: "row",
-    justifyContent: "center",
     gap: 10,
+    justifyContent: "center",
     marginBottom: 20,
   },
-  confirmBtn: {
-    backgroundColor: "#1E293B",
-    padding: 16,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-  confirmText: { color: "white", fontWeight: "bold", fontSize: 14 },
+  confirmBtn: { padding: 16, borderRadius: 16, alignItems: "center" },
+  confirmText: { color: "#FFF", fontWeight: "bold" },
 
-  // MODAL FINANZAS
-  fullScreenModal: { flex: 1, backgroundColor: "#F5F7FA", paddingTop: 50 },
+  // FULL SCREEN MODAL
+  fullScreenModal: { flex: 1, backgroundColor: "#0F172A", paddingTop: 50 },
   fsHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingBottom: 15,
+    padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-    backgroundColor: "white",
+    borderBottomColor: "#1E293B",
   },
-  fsTitle: { fontSize: 18, fontWeight: "800" },
-  fsSubtitle: { fontSize: 13, color: "#64748B", marginBottom: 20 },
-  inputContainer: {
-    marginBottom: 15,
-    backgroundColor: "white",
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-  },
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: "bold",
-    color: "#64748B",
-    marginBottom: 5,
-  },
-  inputField: { fontSize: 16, fontWeight: "bold", color: "#1E293B" },
-  summaryBox: {
+  fsTitle: { color: "#FFF", fontSize: 20, fontWeight: "bold" },
+  fsSub: { color: "#94A3B8", marginBottom: 20 },
+  inputBox: { marginBottom: 15 },
+  fsInput: {
     backgroundColor: "#1E293B",
-    padding: 16,
+    color: "#FFF",
+    padding: 15,
+    borderRadius: 10,
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  totalBox: {
+    backgroundColor: "#1E293B",
+    padding: 20,
     borderRadius: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     marginTop: 10,
-    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: "#10B981",
   },
-  summaryLabel: { color: "#94A3B8", fontWeight: "bold", fontSize: 13 },
-  summaryValue: { color: "#10B981", fontWeight: "900", fontSize: 20 },
-  fsFooter: {
-    padding: 20,
-    backgroundColor: "white",
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
-  },
-  fsConfirmBtn: {
-    backgroundColor: "#10B981",
-    padding: 16,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-  fsConfirmText: { color: "white", fontWeight: "bold", fontSize: 14 },
 
-  // MODAL COSTOS
-  costModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    padding: 20,
-  },
-  costModalContent: { backgroundColor: "white", borderRadius: 20, padding: 20 },
+  // COST DETAILS MODAL STYLES
   costItem: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+    borderBottomColor: "rgba(255,255,255,0.05)",
   },
-  costItemTitle: { fontWeight: "bold", color: "#334155" },
-  costItemSub: { fontSize: 12, color: "#94A3B8" },
-  costItemValue: { fontWeight: "bold", color: "#EF4444" },
+  costMatchName: { color: "#FFF", fontWeight: "bold", fontSize: 13 },
+  costDetail: { color: "#94A3B8", fontSize: 11 },
+  costAmount: { color: "#EF4444", fontWeight: "bold", fontSize: 13 },
   costTotalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
     marginTop: 20,
     paddingTop: 15,
     borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
+    borderTopColor: "rgba(255,255,255,0.1)",
   },
-  costTotalLabel: { fontSize: 12, fontWeight: "bold", color: "#94A3B8" },
-  costTotalValue: { fontSize: 20, fontWeight: "900", color: "#EF4444" },
+  costTotalLabel: { color: "#94A3B8", fontWeight: "900" },
+  costTotalValue: { color: "#EF4444", fontWeight: "900", fontSize: 20 },
 });

@@ -1,24 +1,35 @@
+import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StatusBar,
   StyleSheet,
+  Switch,
   Text,
-  View,
   TextInput,
   TouchableOpacity,
-  Alert,
-  ScrollView,
-  Switch,
+  View,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useState, useEffect } from "react";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { useGame } from "../../../src/context/GameContext";
 import {
   getLuchadorById,
   updateLuchador,
 } from "../../../src/database/operations";
-import { Ionicons } from "@expo/vector-icons";
+
+const CLASSES = ["Cruiser", "Bruiser", "Giant", "Fighter", "Specialist"];
 
 export default function EditLuchadorScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const { brandTheme } = useGame();
 
   // --- ESTADOS ---
   const [name, setName] = useState("");
@@ -28,16 +39,15 @@ export default function EditLuchadorScreen() {
   const [crowd, setCrowd] = useState("Face");
   const [ringLevel, setRingLevel] = useState("1");
   const [mic, setMic] = useState("1");
+  const [pop, setPop] = useState("50"); // Agregado para consistencia, aunque no estaba en tu edit original explícitamente
 
   // Contrato
   const [weeksLeft, setWeeksLeft] = useState("10");
   const [hiringCost, setHiringCost] = useState("0");
-  const [isDraft, setIsDraft] = useState(false); // <--- NUEVO ESTADO
+  const [isDraft, setIsDraft] = useState(false);
 
   const [manualWins, setManualWins] = useState("0");
   const [manualLosses, setManualLosses] = useState("0");
-
-  const classes = ["Cruiser", "Bruiser", "Giant", "Fighter", "Specialist"];
 
   useEffect(() => {
     if (id) {
@@ -50,12 +60,10 @@ export default function EditLuchadorScreen() {
         setCrowd(data.crowd || "Face");
         setRingLevel(data.ringLevel?.toString() || "1");
         setMic(data.mic?.toString() || "1");
+        setPop(data.popularity?.toString() || "50");
         setWeeksLeft(data.weeksLeft?.toString() || "25");
         setHiringCost(data.hiringCost?.toString() || "0");
-
-        // Cargar estado del contrato
         setIsDraft(data.isDraft === 1);
-
         setManualWins(data.normalWins?.toString() || "0");
         setManualLosses(data.normalLosses?.toString() || "0");
       }
@@ -77,287 +85,489 @@ export default function EditLuchadorScreen() {
       Number(mic),
       Number(weeksLeft),
       Number(hiringCost),
-      isDraft ? 1 : 0, // <--- ENVIAMOS EL NUEVO PARÁMETRO
+      // "",  <--- BORRA ESTA LÍNEA (El string vacío causaba el error)
+      isDraft ? 1 : 0,
       Number(manualWins),
       Number(manualLosses)
     );
 
     if (success) {
-      Alert.alert("Actualizado", "Datos guardados correctamente.");
+      Alert.alert("System Update", "Talent data updated successfully.");
       router.back();
     } else {
-      Alert.alert("Error", "No se pudo actualizar el registro.");
+      Alert.alert("Error", "Could not update talent record.");
     }
   };
 
-  return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Editar Luchador</Text>
-
-      <Text style={styles.label}>Nombre:</Text>
-      <TextInput style={styles.input} value={name} onChangeText={setName} />
-
-      <Text style={styles.sectionTitle}>RÉCORD (Sincronizar con 2K25)</Text>
-      <View style={styles.statsRow}>
-        <View style={{ flex: 1, marginRight: 10 }}>
-          <Text style={styles.label}>Wins:</Text>
-          <TextInput
-            style={[styles.input, { color: "#4CAF50", fontWeight: "bold" }]}
-            value={manualWins}
-            onChangeText={setManualWins}
-            keyboardType="numeric"
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.label}>Losses:</Text>
-          <TextInput
-            style={[styles.input, { color: "#F44336", fontWeight: "bold" }]}
-            value={manualLosses}
-            onChangeText={setManualLosses}
-            keyboardType="numeric"
-          />
-        </View>
-      </View>
-
-      <Text style={styles.sectionTitle}>HABILIDADES</Text>
-      <View style={styles.statsRow}>
-        <View style={{ flex: 1, marginRight: 10 }}>
-          <Text style={styles.label}>Nivel Ring:</Text>
-          <TextInput
-            style={styles.input}
-            value={ringLevel}
-            onChangeText={setRingLevel}
-            keyboardType="numeric"
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.label}>Micrófono:</Text>
-          <TextInput
-            style={styles.input}
-            value={mic}
-            onChangeText={setMic}
-            keyboardType="numeric"
-          />
-        </View>
-      </View>
-
-      {/* --- NUEVA SECCIÓN: CONTRATO --- */}
-      <Text style={styles.sectionTitle}>CONTRATO</Text>
-      <View
+  // Helper para Pills
+  const OptionPill = ({ label, selected, onPress }: any) => (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[
+        styles.glassPill,
+        selected && { backgroundColor: brandTheme, borderColor: brandTheme },
+      ]}
+    >
+      <Text
         style={[
-          styles.contractBox,
-          isDraft ? styles.draftBorder : styles.faBorder,
+          styles.pillText,
+          selected && { color: "#FFF", fontWeight: "bold" },
         ]}
       >
-        <View style={styles.switchRow}>
-          <View>
-            <Text style={styles.switchTitle}>
-              {isDraft ? "♾️ DRAFT (Permanente)" : "📅 AGENTE LIBRE (Temporal)"}
-            </Text>
-          </View>
-          <Switch
-            value={isDraft}
-            onValueChange={setIsDraft}
-            trackColor={{ false: "#E0E0E0", true: "#2196F3" }}
-          />
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.mainContainer}>
+      <StatusBar barStyle="light-content" />
+
+      {/* Background */}
+      <View style={[styles.absoluteFill, { backgroundColor: "#000" }]} />
+      <LinearGradient
+        colors={[brandTheme || "#EF4444", "transparent"]}
+        style={[styles.absoluteFill, { height: "40%", opacity: 0.3 }]}
+      />
+
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backBtn}
+          >
+            <Ionicons name="close" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>EDIT PROFILE</Text>
+          <TouchableOpacity onPress={handleUpdate} style={styles.saveIconBtn}>
+            <Ionicons name="checkmark" size={24} color={brandTheme} />
+          </TouchableOpacity>
         </View>
 
-        {!isDraft && (
-          <View style={styles.statsRow}>
-            <View style={{ flex: 1, marginRight: 10 }}>
-              <Text style={styles.label}>Semanas Restantes:</Text>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            contentContainerStyle={{ padding: 20, paddingBottom: 50 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Nombre */}
+            <BlurView intensity={20} tint="dark" style={styles.glassCard}>
+              <Text style={styles.label}>Ring Name</Text>
               <TextInput
-                style={styles.input}
-                value={weeksLeft}
-                onChangeText={setWeeksLeft}
-                keyboardType="numeric"
+                style={styles.mainInput}
+                value={name}
+                onChangeText={setName}
+                placeholderTextColor="#64748B"
               />
+            </BlurView>
+
+            {/* Récord Manual */}
+            <Text style={styles.sectionTitle}>MANUAL RECORD SYNC</Text>
+            <View style={styles.row}>
+              <BlurView intensity={20} tint="dark" style={styles.recordBox}>
+                <Text style={[styles.label, { color: "#4ADE80" }]}>WINS</Text>
+                <TextInput
+                  style={[styles.recordInput, { color: "#4ADE80" }]}
+                  value={manualWins}
+                  onChangeText={setManualWins}
+                  keyboardType="numeric"
+                />
+              </BlurView>
+              <BlurView intensity={20} tint="dark" style={styles.recordBox}>
+                <Text style={[styles.label, { color: "#F87171" }]}>LOSSES</Text>
+                <TextInput
+                  style={[styles.recordInput, { color: "#F87171" }]}
+                  value={manualLosses}
+                  onChangeText={setManualLosses}
+                  keyboardType="numeric"
+                />
+              </BlurView>
             </View>
-          </View>
-        )}
 
-        <View style={{ marginTop: 10 }}>
-          <Text style={styles.label}>Costo Fichaje ($):</Text>
-          <TextInput
-            style={styles.input}
-            value={hiringCost}
-            onChangeText={setHiringCost}
-            keyboardType="numeric"
-          />
-        </View>
-      </View>
+            {/* Atributos */}
+            <Text style={styles.sectionTitle}>ATTRIBUTES</Text>
+            <BlurView intensity={20} tint="dark" style={styles.glassCard}>
+              <View style={styles.row}>
+                <View style={styles.statBox}>
+                  <Text style={styles.miniLabel}>Ring (1-25)</Text>
+                  <TextInput
+                    style={styles.statInput}
+                    value={ringLevel}
+                    onChangeText={setRingLevel}
+                    keyboardType="numeric"
+                    maxLength={2}
+                  />
+                </View>
+                <View style={styles.statBox}>
+                  <Text style={styles.miniLabel}>Mic (1-5)</Text>
+                  <TextInput
+                    style={styles.statInput}
+                    value={mic}
+                    onChangeText={setMic}
+                    keyboardType="numeric"
+                    maxLength={1}
+                  />
+                </View>
+                {/* Pop (Si tu DB lo soporta en update, sino es solo visual) */}
+                <View style={styles.statBox}>
+                  <Text style={styles.miniLabel}>Pop (0-100)</Text>
+                  <TextInput
+                    style={styles.statInput}
+                    value={pop}
+                    onChangeText={setPop}
+                    keyboardType="numeric"
+                    maxLength={3}
+                  />
+                </View>
+              </View>
+            </BlurView>
 
-      <Text style={styles.label}>Género:</Text>
-      <View style={styles.row}>
-        {["Male", "Female"].map((g) => (
-          <TouchableOpacity
-            key={g}
-            style={[styles.btnOption, gender === g && styles.btnSelected]}
-            onPress={() => setGender(g)}
-          >
-            <Text style={[styles.btnText, gender === g && styles.textSelected]}>
-              {g}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+            {/* Contrato */}
+            <Text style={styles.sectionTitle}>CONTRACT DETAILS</Text>
+            <BlurView
+              intensity={20}
+              tint="dark"
+              style={[
+                styles.glassCard,
+                isDraft
+                  ? { borderColor: brandTheme }
+                  : { borderColor: "rgba(255,255,255,0.1)" },
+              ]}
+            >
+              <View style={styles.switchRow}>
+                <View>
+                  <Text style={styles.switchTitle}>
+                    {isDraft ? "PERMANENT DRAFT" : "FREE AGENT"}
+                  </Text>
+                  <Text style={styles.switchSub}>
+                    {isDraft ? "No expiration date." : "Renewals required."}
+                  </Text>
+                </View>
+                <Switch
+                  value={isDraft}
+                  onValueChange={setIsDraft}
+                  trackColor={{ false: "#333", true: brandTheme }}
+                  thumbColor={"#FFF"}
+                />
+              </View>
 
-      <Text style={styles.label}>Reacción (Alignment):</Text>
-      <View style={styles.row}>
-        {["Face", "Heel"].map((c) => (
-          <TouchableOpacity
-            key={c}
-            style={[styles.btnOption, crowd === c && styles.btnSelected]}
-            onPress={() => setCrowd(c)}
-          >
-            <Text style={[styles.btnText, crowd === c && styles.textSelected]}>
-              {c}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+              {!isDraft && (
+                <View style={styles.rowInput}>
+                  <Text style={styles.miniLabel}>Weeks Remaining</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={weeksLeft}
+                    onChangeText={setWeeksLeft}
+                    keyboardType="numeric"
+                  />
+                </View>
+              )}
 
-      <Text style={styles.label}>Clase Principal:</Text>
-      <View style={styles.row}>
-        {classes.map((c) => (
-          <TouchableOpacity
-            key={c}
-            style={[styles.btnOption, wClass === c && styles.btnSelected]}
-            onPress={() => setWClass(c)}
-          >
-            <Text style={[styles.btnText, wClass === c && styles.textSelected]}>
-              {c}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+              <View style={[styles.rowInput, { marginTop: 10 }]}>
+                <Text style={styles.miniLabel}>Salary Cost ($)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={hiringCost}
+                  onChangeText={setHiringCost}
+                  keyboardType="numeric"
+                />
+              </View>
+            </BlurView>
 
-      {/* Lógica Nivel 15 */}
-      {Number(ringLevel) >= 15 ? (
-        <View>
-          <Text style={styles.label}>Clase Secundaria:</Text>
-          <View style={styles.row}>
-            {["None", ...classes].map((c) => (
-              <TouchableOpacity
-                key={c}
-                style={[
-                  styles.btnOption,
-                  altClass === c && styles.btnSelectedAlt,
-                ]}
-                onPress={() => setAltClass(c)}
+            {/* Características */}
+            <Text style={styles.sectionTitle}>CHARACTERISTICS</Text>
+            <BlurView intensity={20} tint="dark" style={styles.glassCard}>
+              <Text style={styles.miniLabel}>Gender</Text>
+              <View style={styles.pillContainer}>
+                {["Male", "Female"].map((g) => (
+                  <OptionPill
+                    key={g}
+                    label={g}
+                    selected={gender === g}
+                    onPress={() => setGender(g)}
+                  />
+                ))}
+              </View>
+
+              <Text style={[styles.miniLabel, { marginTop: 15 }]}>
+                Alignment
+              </Text>
+              <View style={styles.pillContainer}>
+                {["Face", "Heel"].map((c) => (
+                  <OptionPill
+                    key={c}
+                    label={c}
+                    selected={crowd === c}
+                    onPress={() => setCrowd(c)}
+                  />
+                ))}
+              </View>
+            </BlurView>
+
+            {/* Clases */}
+            <Text style={styles.sectionTitle}>FIGHTING STYLE</Text>
+            <BlurView intensity={20} tint="dark" style={styles.glassCard}>
+              <Text style={styles.miniLabel}>Main Class</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 15 }}
               >
-                <Text
-                  style={[
-                    styles.btnText,
-                    altClass === c && styles.textSelected,
-                  ]}
-                >
-                  {c}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      ) : (
-        <View style={styles.lockedContainer}>
-          <Ionicons name="lock-closed" size={16} color="#8e8e93" />
-          <Text style={styles.lockedText}>
-            La clase secundaria se desbloquea en Nivel de Ring 15
-          </Text>
-        </View>
-      )}
+                {CLASSES.map((cls) => (
+                  <TouchableOpacity
+                    key={cls}
+                    onPress={() => setWClass(cls)}
+                    style={[
+                      styles.classPill,
+                      wClass === cls && {
+                        backgroundColor: "rgba(255,255,255,0.2)",
+                        borderColor: "#FFF",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.classText,
+                        wClass === cls && { color: "#FFF" },
+                      ]}
+                    >
+                      {cls}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
 
-      <TouchableOpacity style={styles.saveButton} onPress={handleUpdate}>
-        <Text style={styles.saveButtonText}>GUARDAR CAMBIOS</Text>
-      </TouchableOpacity>
-    </ScrollView>
+              {/* Lógica Nivel 15 */}
+              <Text style={styles.miniLabel}>Secondary Class (Lvl 15+)</Text>
+              {Number(ringLevel) >= 15 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {["None", ...CLASSES].map((cls) => (
+                    <TouchableOpacity
+                      key={cls}
+                      onPress={() => setAltClass(cls)}
+                      style={[
+                        styles.classPill,
+                        altClass === cls && {
+                          backgroundColor: brandTheme + "40",
+                          borderColor: brandTheme,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.classText,
+                          altClass === cls && { color: "#FFF" },
+                        ]}
+                      >
+                        {cls}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={styles.lockedBox}>
+                  <Ionicons name="lock-closed" size={14} color="#64748B" />
+                  <Text style={styles.lockedText}>
+                    Unlocks at Ring Level 15
+                  </Text>
+                </View>
+              )}
+            </BlurView>
+
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: brandTheme }]}
+              onPress={handleUpdate}
+            >
+              <Text style={styles.saveBtnText}>SAVE CHANGES</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
-    backgroundColor: "#fff",
-    flexGrow: 1,
-    paddingBottom: 50,
+  mainContainer: { flex: 1, backgroundColor: "#000" },
+  absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 15,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 20,
-    textAlign: "center",
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  sectionTitle: {
-    fontSize: 10,
+  saveIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerTitle: {
+    fontSize: 16,
     fontWeight: "900",
-    color: "#AAA",
-    marginTop: 25,
+    color: "#FFF",
     letterSpacing: 1,
   },
+
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#94A3B8",
+    marginBottom: 10,
+    marginTop: 20,
+    letterSpacing: 1,
+    paddingLeft: 5,
+  },
+
+  glassCard: {
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    overflow: "hidden",
+  },
+
+  // INPUTS
   label: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "bold",
+    color: "#CBD5E1",
     marginBottom: 5,
-    marginTop: 15,
-    color: "#555",
+  },
+  miniLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#94A3B8",
+    marginBottom: 6,
+  },
+
+  mainInput: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 16,
+    color: "#FFF",
+    fontSize: 20,
+    fontWeight: "bold",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
   input: {
-    backgroundColor: "#f2f2f7",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 10,
     padding: 12,
-    borderRadius: 8,
-    fontSize: 16,
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "600",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  statsRow: { flexDirection: "row", justifyContent: "space-between" },
-  row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  btnOption: {
-    padding: 8,
-    backgroundColor: "#eee",
-    borderRadius: 8,
-    minWidth: 75,
-    alignItems: "center",
-  },
-  btnSelected: { backgroundColor: "#007AFF" },
-  btnSelectedAlt: { backgroundColor: "#5856D6" },
-  btnText: { color: "#333", fontSize: 11 },
-  textSelected: { color: "white", fontWeight: "bold" },
-  saveButton: {
-    backgroundColor: "#007AFF",
-    padding: 18,
-    borderRadius: 12,
-    marginTop: 30,
-    alignItems: "center",
-  },
-  saveButtonText: { color: "white", fontSize: 16, fontWeight: "bold" },
 
-  // Estilos contrato
-  contractBox: {
-    backgroundColor: "#FAFAFA",
+  // RECORD ROW
+  row: { flexDirection: "row", gap: 15 },
+  recordBox: {
+    flex: 1,
+    borderRadius: 16,
     padding: 15,
-    borderRadius: 12,
-    marginTop: 10,
-    borderLeftWidth: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
   },
-  draftBorder: { borderLeftColor: "#2196F3" },
-  faBorder: { borderLeftColor: "#FF9800" },
+  recordInput: {
+    fontSize: 28,
+    fontWeight: "900",
+    textAlign: "center",
+    width: "100%",
+  },
+
+  // STATS
+  statBox: { flex: 1 },
+  statInput: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 12,
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+
+  // CONTRACT
   switchRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 10,
   },
-  switchTitle: { fontWeight: "bold", fontSize: 14, color: "#333" },
+  switchTitle: { fontWeight: "bold", fontSize: 14, color: "#FFF" },
+  switchSub: { fontSize: 11, color: "#94A3B8" },
+  rowInput: { marginTop: 5 },
 
-  lockedContainer: {
+  // PILLS
+  pillContainer: { flexDirection: "row", gap: 8 },
+  glassPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    flex: 1,
+    alignItems: "center",
+  },
+  pillText: { fontSize: 12, color: "#94A3B8", fontWeight: "600" },
+
+  classPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    marginRight: 8,
+    backgroundColor: "transparent",
+  },
+  classText: { color: "#94A3B8", fontWeight: "600", fontSize: 12 },
+
+  // LOCKED
+  lockedBox: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f2f2f7",
-    padding: 15,
-    borderRadius: 8,
-    marginTop: 20,
-    gap: 10,
-    borderStyle: "dashed",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.03)",
     borderWidth: 1,
-    borderColor: "#d1d1d6",
+    borderColor: "rgba(255,255,255,0.05)",
+    borderStyle: "dashed",
   },
-  lockedText: { color: "#8e8e93", fontSize: 12, fontWeight: "600" },
+  lockedText: { color: "#64748B", fontSize: 12, fontStyle: "italic" },
+
+  saveBtn: {
+    padding: 18,
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: 30,
+  },
+  saveBtnText: {
+    color: "#FFF",
+    fontWeight: "900",
+    fontSize: 16,
+    letterSpacing: 1,
+  },
 });

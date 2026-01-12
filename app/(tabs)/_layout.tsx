@@ -1,7 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
-import React, { useEffect, useRef } from "react";
-import { Animated, Platform, StyleSheet, View } from "react-native";
+import React from "react";
+import { Platform, StyleSheet, View } from "react-native";
 import { useGame } from "../../src/context/GameContext";
 
 export default function TabLayout() {
@@ -11,167 +12,99 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarActiveTintColor: brandTheme || "#EF4444",
+        tabBarInactiveTintColor: "#94A3B8",
         tabBarShowLabel: false,
-        tabBarHideOnKeyboard: true,
-
-        // --- CLAVE PARA LA FLUIDEZ ---
-        // 'fade' o 'slide_from_right' hacen que el cambio no sea un salto seco
-        animation: "fade",
-
-        tabBarStyle: {
-          position: "absolute",
-          bottom: Platform.OS === "ios" ? 30 : 20,
-          left: 20,
-          right: 20,
-          elevation: 0,
-          backgroundColor: "#ffffff",
-          borderRadius: 25,
-          height: 65,
-          borderTopWidth: 0,
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 5 },
-          shadowOpacity: 0.1,
-          shadowRadius: 10,
-        },
+        // Configuración crítica para el centrado
+        tabBarStyle: styles.tabBar,
+        tabBarItemStyle: styles.tabBarItem,
+        tabBarBackground: () => (
+          <View style={styles.blurContainer}>
+            <BlurView
+              intensity={80}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
+          </View>
+        ),
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} name="home" color={brandTheme} />
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="home" size={26} color={color} />
           ),
         }}
       />
-
       <Tabs.Screen
         name="roster"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} name="people" color={brandTheme} />
+          tabBarIcon: ({ color }) => (
+            <MaterialCommunityIcons
+              name="shield-star"
+              size={28}
+              color={color}
+            />
           ),
         }}
       />
-
       <Tabs.Screen
         name="show"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} name="calendar" color={brandTheme} />
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="film" size={26} color={color} />
           ),
         }}
       />
-
       <Tabs.Screen
         name="finances"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} name="wallet" color={brandTheme} />
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="stats-chart" size={24} color={color} />
           ),
         }}
       />
-
-      <Tabs.Screen
-        name="history"
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon focused={focused} name="time" color={brandTheme} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="history" options={{ href: null }} />
     </Tabs>
   );
 }
 
-// --- COMPONENTE ICONO ANIMADO MEJORADO ---
-const TabIcon = ({
-  focused,
-  name,
-  color,
-}: {
-  focused: boolean;
-  name: any;
-  color: string;
-}) => {
-  const animVal = useRef(new Animated.Value(focused ? 1 : 0)).current;
-
-  useEffect(() => {
-    Animated.spring(animVal, {
-      toValue: focused ? 1 : 0,
-      useNativeDriver: false, // false para animar colores y sombras
-      friction: 7,
-      tension: 70,
-    }).start();
-  }, [focused]);
-
-  const translateY = animVal.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, -12], // Salto más sutil para no verse exagerado
-  });
-
-  const backgroundColor = animVal.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["transparent", color],
-  });
-
-  const scale = animVal.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.1],
-  });
-
-  return (
-    <View style={styles.iconContainer}>
-      <Animated.View
-        style={[
-          styles.bubble,
-          {
-            transform: [{ translateY }, { scale }],
-            backgroundColor,
-            shadowColor: color,
-            shadowOpacity: focused ? 0.4 : 0,
-          },
-        ]}
-      >
-        <Ionicons
-          name={focused ? name : `${name}-outline`}
-          size={24}
-          color={focused ? "white" : "#94A3B8"}
-        />
-      </Animated.View>
-      {focused && (
-        <Animated.View
-          style={[
-            styles.indicator,
-            { backgroundColor: color, opacity: animVal },
-          ]}
-        />
-      )}
-    </View>
-  );
-};
-
 const styles = StyleSheet.create({
-  iconContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    width: 60,
-    height: "100%",
-  },
-  bubble: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 6,
-    elevation: 5,
-  },
-  indicator: {
+  tabBar: {
     position: "absolute",
-    bottom: 5,
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    bottom: 30, // Elevación sobre el borde
+    left: 50, // Más estrecha para que parezca cápsula
+    right: 50,
+    height: 64, // Altura fija
+    borderRadius: 32,
+    backgroundColor: "transparent",
+    borderTopWidth: 0,
+    elevation: 0,
+    paddingBottom: 0, // RESET de iOS: Esto evita que se suban los iconos
+    marginBottom: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+  },
+  tabBarItem: {
+    // Forzamos el centrado vertical absoluto del contenedor del icono
+    height: 64,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: Platform.OS === "ios" ? 0 : 0, // Ignoramos el safe area automático
+    top: 10,
+  },
+  blurContainer: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 32,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)", // Brillo sutil de cristal
   },
 });

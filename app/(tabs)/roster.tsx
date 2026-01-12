@@ -1,66 +1,90 @@
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { Image } from "expo-image"; // <--- AÑADIDO: Componente optimizado
 import { LinearGradient } from "expo-linear-gradient";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
   Dimensions,
   FlatList,
-  Image,
+  // Image, <--- ELIMINADO DE AQUÍ
+  LayoutAnimation,
   Modal,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from "react-native";
-import { useGame } from "../../src/context/GameContext"; // <--- 1. IMPORTAR CONTEXTO
-import { getAllLuchadores, getAllTitles } from "../../src/database/operations";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-// Componente Header Global
-import { ManagementHeader } from "../../src/components/ManagementHeader";
+// Context & Operations
+import { useGame } from "../../src/context/GameContext";
+import {
+  createRivalry,
+  deleteRivalry,
+  getActiveRivalries,
+  getAllLuchadores,
+  getAllTitles,
+  getRivalryMatches,
+} from "../../src/database/operations";
+
+// --- IMPORTAR EL HELPER DE IMÁGENES ---
+import { getWrestlerImage } from "../../src/utils/imageHelper";
+
+// Enable LayoutAnimation for Android
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
 
-// --- OPCIONES DE FILTRO ---
+// --- FILTER OPTIONS ---
 const SORT_OPTIONS = [
-  { id: "Name", label: "Nombre (A-Z)" },
-  { id: "RatingDesc", label: "Nivel (Mayor a Menor)" },
-  { id: "RatingAsc", label: "Nivel (Menor a Mayor)" },
-  { id: "Wins", label: "Más Victorias" },
-  { id: "Losses", label: "Más Derrotas" },
-  { id: "ContractAsc", label: "Contrato (Por Vencer)" },
+  { id: "Name", label: "Name (A-Z)" },
+  { id: "RatingDesc", label: "Rating (High-Low)" },
+  { id: "RatingAsc", label: "Rating (Low-High)" },
+  { id: "Wins", label: "Most Wins" },
+  { id: "Losses", label: "Most Losses" },
+  { id: "ContractAsc", label: "Expiring Soon" },
 ];
 
-const GENDER_OPTIONS = ["Todos", "Male", "Female"];
 const ROLE_OPTIONS = ["Todos", "Face", "Heel"];
-const CLASS_OPTIONS = [
-  "Todos",
-  "Giant",
-  "Cruiser",
-  "Bruiser",
-  "Fighter",
-  "Specialist",
-];
-const STATUS_OPTIONS = [
-  { id: "All", label: "Ver Todos" },
-  { id: "Champions", label: "Solo Campeones" },
-  { id: "Draft", label: "Draft Permanente" },
-  { id: "Expiring", label: "Por Vencer (<5 sem)" },
-  { id: "Expired", label: "Contrato Vencido" },
-];
 
-export default function RosterScreen() {
+export default function LockerRoomScreen() {
   const router = useRouter();
-  const { saveId, brandTheme } = useGame(); // <--- 2. USAR CONTEXTO
+  const { saveId, brandTheme } = useGame();
 
+  // Data States
   const [roster, setRoster] = useState<any[]>([]);
   const [titles, setTitles] = useState<any[]>([]);
+  const [rivalries, setRivalries] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // ESTADOS DE FILTRO
-  const [modalVisible, setModalVisible] = useState(false);
+  // UI States
+  const [activeTab, setActiveTab] = useState<
+    "Talents" | "Championships" | "Rivalries"
+  >("Talents");
 
+  // Modals
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [rivalryModalVisible, setRivalryModalVisible] = useState(false);
+  const [rivalryDetailVisible, setRivalryDetailVisible] = useState(false);
+  const [selectedRivalryData, setSelectedRivalryData] = useState<any>(null);
+  const [rivalryHistory, setRivalryHistory] = useState<any[]>([]);
+
+  // Rivalry Creation State
+  const [selectedRival1, setSelectedRival1] = useState<number | null>(null);
+  const [selectedRival2, setSelectedRival2] = useState<number | null>(null);
+
+  // Filter States
   const [filters, setFilters] = useState({
     sortBy: "Name",
     status: "All",
@@ -68,64 +92,92 @@ export default function RosterScreen() {
     role: "Todos",
     fighterClass: "Todos",
   });
-
   const [tempFilters, setTempFilters] = useState(filters);
 
-  // NOTA: initDatabase() ya se llama en _layout.tsx, no hace falta aquí.
+  // Load Data
+  const loadData = async () => {
+    if (!saveId) return;
+    setLoading(true);
 
-  const loadData = () => {
-    if (!saveId) return; // Protección
-
-    // 3. PASAR SAVE_ID A LAS FUNCIONES
     const luchadoresData = getAllLuchadores(saveId);
     const titlesData = getAllTitles(saveId);
+    let rivalriesData = getActiveRivalries(saveId);
+
+    // --- NUEVO: Calcular el Heat Real basado en promedio de estrellas ---
+    rivalriesData = rivalriesData.map((r: any) => {
+      const matches = getRivalryMatches(saveId, r.luchador_id1, r.luchador_id2);
+      if (matches.length === 0) return { ...r, calculatedHeat: 1 }; // Base level
+
+      const totalStars = matches.reduce(
+        (sum: number, m: any) => sum + (m.rating || 0),
+        0
+      );
+      const avg = totalStars / matches.length;
+
+      let heat = 1;
+      if (avg >= 4.5) heat = 5;
+      else if (avg >= 3.5) heat = 4;
+      else if (avg >= 2.5) heat = 3;
+      else if (avg >= 1.5) heat = 2;
+
+      return { ...r, calculatedHeat: heat };
+    });
 
     setRoster(luchadoresData);
     setTitles(titlesData);
+    setRivalries(rivalriesData);
+    setLoading(false);
   };
-
-  // Dentro de RosterScreen en app/(tabs)/roster.tsx
-  const [isReady, setIsReady] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-      const task = setTimeout(() => {
-        loadData();
-        setIsReady(true);
-      }, 100); // 100ms es suficiente para que la transición se vea fluida
-
-      return () => clearTimeout(task);
-    }, [])
+      loadData();
+    }, [saveId])
   );
 
-  if (!isReady) return <View style={{ flex: 1, backgroundColor: "#F5F7FA" }} />;
-
-  const openFilterModal = () => {
-    setTempFilters(filters);
-    setModalVisible(true);
+  const handleCreateRivalry = () => {
+    if (selectedRival1 && selectedRival2 && saveId) {
+      createRivalry(saveId, selectedRival1, selectedRival2, 1);
+      setRivalryModalVisible(false);
+      setSelectedRival1(null);
+      setSelectedRival2(null);
+      loadData();
+    }
   };
 
-  const applyFilters = () => {
-    setFilters(tempFilters);
-    setModalVisible(false);
+  const handleDeleteRivalry = (id: number) => {
+    deleteRivalry(id);
+    loadData();
   };
 
-  // --- MOTOR DE FILTRADO ---
+  const openRivalryDetail = (rivalryItem: any) => {
+    if (!saveId) return;
+    const history = getRivalryMatches(
+      saveId,
+      rivalryItem.luchador_id1,
+      rivalryItem.luchador_id2
+    );
+
+    const r1 = roster.find((r) => r.id === rivalryItem.luchador_id1);
+    const r2 = roster.find((r) => r.id === rivalryItem.luchador_id2);
+
+    setSelectedRivalryData({
+      ...rivalryItem,
+      r1,
+      r2,
+    });
+    setRivalryHistory(history);
+    setRivalryDetailVisible(true);
+  };
+
+  // --- FILTER LOGIC ---
   const getProcessedRoster = () => {
     let data = [...roster];
-
-    // 1. Filtros
-    if (filters.gender !== "Todos") {
+    if (filters.gender !== "Todos")
       data = data.filter((l) => l.gender === filters.gender);
-    }
-    if (filters.role !== "Todos") {
+    if (filters.role !== "Todos")
       data = data.filter((l) => l.crowd === filters.role);
-    }
-    if (filters.fighterClass !== "Todos") {
-      data = data.filter((l) => l.mainClass === filters.fighterClass);
-    }
 
-    // 2. Estado
     if (filters.status === "Champions") {
       data = data.filter((l) =>
         titles.some((t) => t.holderId1 === l.id || t.holderId2 === l.id)
@@ -136,11 +188,8 @@ export default function RosterScreen() {
       data = data.filter(
         (l) => l.isDraft === 0 && l.weeksLeft <= 5 && l.weeksLeft > 0
       );
-    } else if (filters.status === "Expired") {
-      data = data.filter((l) => l.isDraft === 0 && l.weeksLeft <= 0);
     }
 
-    // 3. Ordenamiento
     data.sort((a, b) => {
       switch (filters.sortBy) {
         case "Name":
@@ -151,661 +200,959 @@ export default function RosterScreen() {
           return (a.ringLevel || 0) - (b.ringLevel || 0);
         case "Wins":
           return b.normalWins - a.normalWins;
-        case "Losses":
-          return b.normalLosses - a.normalLosses;
-        case "ContractAsc":
-          if (a.isDraft === 1) return 1;
-          if (b.isDraft === 1) return -1;
-          return a.weeksLeft - b.weeksLeft;
         default:
           return 0;
       }
     });
-
     return data;
   };
 
   const filteredData = getProcessedRoster();
 
-  // --- HELPERS ---
-  const getChampionTitle = (luchadorId: number) => {
-    return titles.find(
-      (t) => t.holderId1 === luchadorId || t.holderId2 === luchadorId
+  // --- RENDERERS ---
+  const renderWrestlerCard = ({ item }: { item: any }) => {
+    const isExpired = item.isDraft === 0 && item.weeksLeft <= 0;
+    const isHeel = item.crowd === "Heel";
+    const alignmentColor = isHeel ? "#EF4444" : "#3B82F6";
+    const hasTitle = titles.some(
+      (t) => t.holderId1 === item.id || t.holderId2 === item.id
     );
-  };
-
-  // --- HELPER COMPONENT ---
-  const RenderChip = ({
-    label,
-    value,
-    selectedValue,
-    defaultValue,
-    onPress,
-  }: any) => {
-    const isSelected = value === selectedValue;
-    const isDefault = value === defaultValue;
 
     return (
       <TouchableOpacity
-        style={[
-          styles.chip,
-          isSelected &&
-            (isDefault
-              ? styles.chipDefaultSelected
-              : {
-                  backgroundColor: brandTheme, // 4. USAR COLOR TEMA
-                  borderColor: brandTheme,
-                }),
-        ]}
-        onPress={onPress}
+        activeOpacity={0.85}
+        onPress={() => router.push(`../luchador/${item.id}`)}
+        style={[styles.cardContainer, isExpired && { opacity: 0.5 }]}
       >
-        <Text
-          style={[
-            styles.chipText,
-            isSelected &&
-              (isDefault
-                ? styles.chipTextDefaultSelected
-                : styles.chipTextActive),
-          ]}
+        <BlurView
+          intensity={20}
+          tint="dark"
+          style={[styles.cardBlur, { borderColor: `${alignmentColor}40` }]}
         >
-          {label}
-        </Text>
+          <View style={styles.cardHeader}>
+            {hasTitle && <Ionicons name="trophy" size={14} color="#FFD700" />}
+          </View>
+          <View style={styles.imageWrapper}>
+            {/* --- EXPO IMAGE --- */}
+            <Image
+              source={{ uri: getWrestlerImage(item.imageUri) }}
+              style={styles.wrestlerImage}
+              contentFit="cover"
+              transition={500}
+            />
+          </View>
+          <View style={styles.cardInfo}>
+            <Text style={styles.wrestlerName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <View style={styles.statsRow}>
+              <Text style={[styles.statText, { color: alignmentColor }]}>
+                {item.crowd}
+              </Text>
+              <Text style={styles.statDivider}>•</Text>
+              <Text style={styles.statText}>Lvl {item.ringLevel}</Text>
+            </View>
+          </View>
+          <View
+            style={[styles.alignmentBar, { backgroundColor: alignmentColor }]}
+          />
+        </BlurView>
       </TouchableOpacity>
     );
   };
 
-  const renderCard = ({ item }: { item: any }) => {
-    const isExpired = item.isDraft === 0 && item.weeksLeft <= 0;
-    const activeTitle = getChampionTitle(item.id);
-    const weeks = item.weeksLeft || 0;
-
-    let contractColor = "#10B981";
-    if (weeks <= 5) contractColor = "#EF4444";
-    else if (weeks <= 10) contractColor = "#F59E0B";
-    if (item.isDraft === 1) contractColor = "#3B82F6";
-
-    const isHeel = item.crowd === "Heel";
-    const alignColor = isHeel ? "#EF4444" : "#3B82F6";
-    const genderIcon =
-      item.gender === "Female" ? "gender-female" : "gender-male";
-    const genderColor = item.gender === "Female" ? "#EC4899" : "#3B82F6";
-
+  const renderTitleCard = ({ item }: { item: any }) => {
+    const holder1 = roster.find((l) => l.id === item.holderId1);
+    const holder2 = roster.find((l) => l.id === item.holderId2);
     return (
       <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={() => router.push(`../luchador/${item.id}`)}
-        style={[styles.cardContainer, isExpired && { opacity: 0.6 }]}
+        style={styles.titleCardContainer}
+        onPress={() => router.push(`/titles/${item.id}`)}
       >
-        <View style={styles.cardInner}>
-          <View style={styles.imageContainer}>
-            {item.imageUri ? (
-              <Image
-                source={{ uri: item.imageUri }}
-                style={styles.cardImage}
-                resizeMode="cover"
-              />
-            ) : (
-              <View
-                style={[styles.placeholder, { backgroundColor: "#F1F5F9" }]}
-              >
-                <Text style={styles.placeholderText}>
-                  {item.name.charAt(0)}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.ringLevelBadge}>
-              <Text style={styles.ringLevelText}>{item.ringLevel || 50}</Text>
-            </View>
-
-            <View
-              style={[styles.genderBadge, { backgroundColor: genderColor }]}
-            >
-              <MaterialCommunityIcons
-                name={genderIcon}
-                size={12}
-                color="white"
-              />
-            </View>
-          </View>
-
-          <View style={styles.infoContainer}>
-            {activeTitle ? (
-              <LinearGradient
-                colors={["#F59E0B", "#B45309"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.champBanner}
-              >
-                <Ionicons name="trophy" size={10} color="white" />
-                <Text style={styles.champBannerText} numberOfLines={1}>
-                  {activeTitle.name}
-                </Text>
-              </LinearGradient>
-            ) : (
-              <View style={{ height: 4 }} />
-            )}
-
-            <Text style={styles.cardName} numberOfLines={1}>
-              {item.name}
+        <BlurView intensity={25} tint="dark" style={styles.titleCardBlur}>
+          <View style={styles.titleInfo}>
+            <Text style={styles.titleCategory}>
+              {item.category.toUpperCase()}
             </Text>
-
-            <View style={styles.statsRow}>
-              <View
-                style={[
-                  styles.alignBadge,
-                  { borderColor: alignColor, marginRight: 6 },
-                ]}
-              >
-                <Text style={[styles.alignText, { color: alignColor }]}>
-                  {item.crowd.toUpperCase().slice(0, 4)}
-                </Text>
-              </View>
-              <Text style={styles.classText}>{item.mainClass}</Text>
-              <View style={{ flex: 1 }} />
-              <Text style={styles.recordText}>
-                <Text style={{ color: "#10B981" }}>{item.normalWins}W</Text>-
-                <Text style={{ color: "#EF4444" }}>{item.normalLosses}L</Text>
-              </Text>
-            </View>
-
-            <View style={{ marginTop: 8 }}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  marginBottom: 2,
-                }}
-              >
-                <Text style={styles.contractLabel}>Contrato</Text>
-                <Text style={[styles.contractValue, { color: contractColor }]}>
-                  {item.isDraft === 1 ? "∞" : `${weeks} sem.`}
-                </Text>
-              </View>
-              {item.isDraft === 0 && (
-                <View style={styles.contractBarBg}>
-                  <View
-                    style={[
-                      styles.contractBarFill,
-                      {
-                        width: `${Math.min((weeks / 25) * 100, 100)}%`,
-                        backgroundColor: contractColor,
-                      },
-                    ]}
+            <Text style={styles.titleName}>{item.name}</Text>
+            <View style={styles.holderRow}>
+              {holder1 ? (
+                <View style={styles.holderChip}>
+                  <Image
+                    source={{ uri: getWrestlerImage(holder1.imageUri) }}
+                    style={styles.holderAvatar}
+                    contentFit="cover"
+                    transition={500}
                   />
+                  <Text style={styles.holderName}>{holder1.name}</Text>
+                </View>
+              ) : (
+                <Text style={styles.vacantText}>VACANT</Text>
+              )}
+              {holder2 && (
+                <View
+                  style={[styles.holderChip, { marginLeft: -10, zIndex: -1 }]}
+                >
+                  <Image
+                    source={{ uri: getWrestlerImage(holder2.imageUri) }}
+                    style={styles.holderAvatar}
+                    contentFit="cover"
+                    transition={500}
+                  />
+                  <Text style={styles.holderName}>{holder2.name}</Text>
                 </View>
               )}
             </View>
           </View>
-        </View>
+          <Ionicons name="chevron-forward" size={20} color="#64748B" />
+        </BlurView>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderRivalryCard = ({ item }: { item: any }) => {
+    const r1 = roster.find((r) => r.id === item.luchador_id1);
+    const r2 = roster.find((r) => r.id === item.luchador_id2);
+    if (!r1 || !r2) return null;
+
+    const heatLevel = item.calculatedHeat || item.level || 1;
+
+    let heatColor = "#3B82F6";
+    let heatLabel = "DULL";
+
+    if (heatLevel >= 5) {
+      heatColor = "#EF4444";
+      heatLabel = "LEGENDARY";
+    } else if (heatLevel === 4) {
+      heatColor = "#F97316";
+      heatLabel = "GREAT";
+    } else if (heatLevel === 3) {
+      heatColor = "#F59E0B";
+      heatLabel = "SOLID";
+    } else if (heatLevel === 2) {
+      heatColor = "#94A3B8";
+      heatLabel = "WEAK";
+    }
+
+    return (
+      <TouchableOpacity
+        style={styles.rivalryCard}
+        activeOpacity={0.9}
+        onPress={() => openRivalryDetail(item)}
+      >
+        <BlurView intensity={20} tint="dark" style={styles.rivalryBlur}>
+          <View style={styles.rivalSide}>
+            <Image
+              source={{ uri: getWrestlerImage(r1.imageUri) }}
+              style={[
+                styles.rivalAvatar,
+                { borderColor: r1.crowd === "Face" ? "#3B82F6" : "#EF4444" },
+              ]}
+              contentFit="cover"
+              transition={500}
+            />
+            <Text style={styles.rivalName} numberOfLines={1}>
+              {r1.name}
+            </Text>
+          </View>
+
+          <View style={styles.rivalCenter}>
+            <Text style={styles.vsText}>VS</Text>
+            <View style={styles.heatMeterContainer}>
+              <View
+                style={[
+                  styles.heatMeterFill,
+                  {
+                    width: `${(heatLevel / 5) * 100}%`,
+                    backgroundColor: heatColor,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={[styles.heatText, { color: heatColor }]}>
+              {heatLabel}
+            </Text>
+          </View>
+
+          <View style={styles.rivalSide}>
+            <Image
+              source={{ uri: getWrestlerImage(r2.imageUri) }}
+              style={[
+                styles.rivalAvatar,
+                { borderColor: r2.crowd === "Face" ? "#3B82F6" : "#EF4444" },
+              ]}
+              contentFit="cover"
+              transition={500}
+            />
+            <Text style={styles.rivalName} numberOfLines={1}>
+              {r2.name}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.deleteRivalryBtn}
+            onPress={() => handleDeleteRivalry(item.id)}
+          >
+            <Ionicons name="archive-outline" size={16} color="#64748B" />
+          </TouchableOpacity>
+        </BlurView>
       </TouchableOpacity>
     );
   };
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" />
-
-      <ManagementHeader />
-
-      {/* SUB-HEADER */}
-      <View style={styles.headerContainer}>
-        <View>
-          <Text style={styles.headerTitle}>Mi Roster</Text>
-          <Text style={styles.headerSubtitle}>
-            {filteredData.length} Talentos encontrados
-          </Text>
-        </View>
-
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <TouchableOpacity
-            onPress={openFilterModal}
-            style={[
-              styles.iconBtn,
-              (filters.status !== "All" ||
-                filters.gender !== "Todos" ||
-                filters.sortBy !== "Name") && {
-                borderColor: brandTheme, // TEMA
-                backgroundColor: "#EFF6FF", // Podríamos ajustar esto también, pero azul claro suele quedar bien
-              },
-            ]}
-          >
-            <Ionicons
-              name="filter"
-              size={20}
-              color={
-                filters.status !== "All" ||
-                filters.gender !== "Todos" ||
-                filters.sortBy !== "Name"
-                  ? brandTheme // TEMA
-                  : "#64748B"
-              }
-            />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => router.push("/titles/manage")}
-            style={styles.iconBtn}
-          >
-            <Ionicons name="trophy" size={20} color="#F59E0B" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <FlatList
-        data={filteredData}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={renderCard}
-        numColumns={2}
-        columnWrapperStyle={{ justifyContent: "space-between" }}
-        contentContainerStyle={styles.gridContent}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Ionicons name="people-outline" size={48} color="#CBD5E1" />
-            <Text style={styles.emptyText}>
-              No hay talentos con estos filtros.
-            </Text>
-          </View>
-        }
+      <StatusBar barStyle="light-content" />
+      <View style={[styles.absoluteFill, { backgroundColor: "#000" }]} />
+      <LinearGradient
+        colors={[brandTheme || "#EF4444", "transparent"]}
+        style={[styles.absoluteFill, { height: "35%", opacity: 0.25 }]}
       />
 
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => router.push("../luchador/new")}
-      >
-        <LinearGradient
-          // TEMA PARA EL BOTÓN +
-          colors={[brandTheme, "#1E293B"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.fabGradient}
-        >
-          <Ionicons name="add" size={30} color="white" />
-        </LinearGradient>
-      </TouchableOpacity>
+      <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+        <View style={styles.header}>
+          <Text style={styles.screenTitle}>Locker Room</Text>
+          {activeTab === "Talents" && (
+            <TouchableOpacity
+              onPress={() => setFilterModalVisible(true)}
+              style={styles.filterBtn}
+            >
+              <Ionicons name="options" size={20} color="#FFF" />
+            </TouchableOpacity>
+          )}
+        </View>
 
-      {/* --- MODAL DE FILTROS --- */}
+        <View style={styles.segmentContainer}>
+          <BlurView intensity={30} tint="light" style={styles.segmentBlur}>
+            {["Talents", "Championships", "Rivalries"].map((tab) => (
+              <TouchableOpacity
+                key={tab}
+                style={[
+                  styles.segmentBtn,
+                  activeTab === tab && styles.segmentBtnActive,
+                ]}
+                onPress={() => {
+                  LayoutAnimation.configureNext(
+                    LayoutAnimation.Presets.easeInEaseOut
+                  );
+                  setActiveTab(tab as any);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.segmentText,
+                    activeTab === tab && styles.segmentTextActive,
+                  ]}
+                >
+                  {tab === "Championships" ? "Titles" : tab}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </BlurView>
+        </View>
+
+        {activeTab === "Talents" ? (
+          <FlatList
+            key="talents-grid"
+            data={filteredData}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={renderWrestlerCard}
+            numColumns={2}
+            columnWrapperStyle={{ justifyContent: "space-between" }}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : activeTab === "Championships" ? (
+          <FlatList
+            key="titles-list"
+            data={titles}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={renderTitleCard}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : (
+          <FlatList
+            key="rivalries-list"
+            data={rivalries}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={renderRivalryCard}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Ionicons
+                  name="flame-outline"
+                  size={40}
+                  color="rgba(255,255,255,0.2)"
+                />
+                <Text style={styles.emptyText}>No active rivalries.</Text>
+              </View>
+            }
+          />
+        )}
+
+        {/* FABs */}
+        {activeTab === "Talents" && (
+          <TouchableOpacity
+            style={styles.fab}
+            onPress={() => router.push("../luchador/new")}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={[brandTheme || "#EF4444", "#1E293B"]}
+              style={styles.fabGradient}
+            >
+              <Ionicons name="add" size={30} color="white" />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
+        {activeTab === "Rivalries" && (
+          <TouchableOpacity
+            style={styles.fab}
+            onPress={() => setRivalryModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={["#F59E0B", "#B45309"]}
+              style={styles.fabGradient}
+            >
+              <Ionicons name="flame" size={28} color="white" />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+      </SafeAreaView>
+
+      {/* FILTER MODAL */}
       <Modal
         animationType="slide"
-        visible={modalVisible}
-        presentationStyle="pageSheet"
-        onRequestClose={() => setModalVisible(false)}
+        transparent={true}
+        visible={filterModalVisible}
+        onRequestClose={() => setFilterModalVisible(false)}
       >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Filtrar y Ordenar</Text>
-            <TouchableOpacity onPress={() => setModalVisible(false)}>
-              <Text
-                style={{ color: brandTheme, fontSize: 16, fontWeight: "600" }}
+        <BlurView intensity={90} tint="dark" style={styles.modalContainer}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filters</Text>
+              <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                <Text style={{ color: brandTheme, fontWeight: "700" }}>
+                  Done
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalScroll}>
+              <Text style={styles.filterLabel}>Sort By</Text>
+              <View style={styles.chipRow}>
+                {SORT_OPTIONS.map((opt) => (
+                  <FilterChip
+                    key={opt.id}
+                    label={opt.label}
+                    selected={tempFilters.sortBy === opt.id}
+                    onPress={() =>
+                      setTempFilters({ ...tempFilters, sortBy: opt.id })
+                    }
+                    theme={brandTheme}
+                  />
+                ))}
+              </View>
+              <Text style={styles.filterLabel}>Role</Text>
+              <View style={styles.chipRow}>
+                {ROLE_OPTIONS.map((opt) => (
+                  <FilterChip
+                    key={opt}
+                    label={opt}
+                    selected={tempFilters.role === opt}
+                    onPress={() =>
+                      setTempFilters({ ...tempFilters, role: opt })
+                    }
+                    theme={brandTheme}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[styles.applyBtn, { backgroundColor: brandTheme }]}
+                onPress={() => {
+                  setFilters(tempFilters);
+                  setFilterModalVisible(false);
+                }}
               >
-                Cerrar
-              </Text>
+                <Text style={styles.applyBtnText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </BlurView>
+      </Modal>
+
+      {/* NEW RIVALRY MODAL */}
+      <Modal
+        visible={rivalryModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setRivalryModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={95} tint="dark" style={styles.glassModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Ignite Rivalry</Text>
+              <TouchableOpacity onPress={() => setRivalryModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+            <View style={{ padding: 20 }}>
+              <Text style={styles.pickerLabel}>SELECT FIRST RIVAL</Text>
+              <FlatList
+                horizontal
+                data={roster}
+                style={{ marginBottom: 20 }}
+                showsHorizontalScrollIndicator={false}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    onPress={() => setSelectedRival1(item.id)}
+                    style={[
+                      styles.avatarPick,
+                      selectedRival1 === item.id && {
+                        borderColor: brandTheme,
+                        borderWidth: 2,
+                      },
+                    ]}
+                  >
+                    <Image
+                      source={{ uri: getWrestlerImage(item.imageUri) }}
+                      style={styles.avatarImg}
+                      contentFit="cover"
+                      transition={500}
+                    />
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.avatarName,
+                        selectedRival1 === item.id && { color: brandTheme },
+                      ]}
+                    >
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+              <Text style={styles.pickerLabel}>SELECT SECOND RIVAL</Text>
+              <FlatList
+                horizontal
+                data={roster.filter((r) => r.id !== selectedRival1)}
+                style={{ marginBottom: 20 }}
+                showsHorizontalScrollIndicator={false}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    onPress={() => setSelectedRival2(item.id)}
+                    style={[
+                      styles.avatarPick,
+                      selectedRival2 === item.id && {
+                        borderColor: "#EF4444",
+                        borderWidth: 2,
+                      },
+                    ]}
+                  >
+                    <Image
+                      source={{ uri: getWrestlerImage(item.imageUri) }}
+                      style={styles.avatarImg}
+                      contentFit="cover"
+                      transition={500}
+                    />
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.avatarName,
+                        selectedRival2 === item.id && { color: "#EF4444" },
+                      ]}
+                    >
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.applyBtn,
+                  { backgroundColor: "#F59E0B", marginTop: 10 },
+                  (!selectedRival1 || !selectedRival2) && { opacity: 0.5 },
+                ]}
+                disabled={!selectedRival1 || !selectedRival2}
+                onPress={handleCreateRivalry}
+              >
+                <Text style={styles.applyBtnText}>CREATE RIVALRY 🔥</Text>
+              </TouchableOpacity>
+            </View>
+          </BlurView>
+        </View>
+      </Modal>
+
+      {/* RIVALRY HISTORY MODAL */}
+      <Modal
+        visible={rivalryDetailVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setRivalryDetailVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: "#000" }}>
+          <View style={styles.detailHeader}>
+            <Text style={styles.detailTitle}>RIVALRY LOGBOOK</Text>
+            <TouchableOpacity onPress={() => setRivalryDetailVisible(false)}>
+              <Ionicons name="close-circle" size={30} color="#64748B" />
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.detailVsHeader}>
+            <View style={{ alignItems: "center" }}>
+              <Image
+                source={{
+                  uri: getWrestlerImage(selectedRivalryData?.r1?.imageUri),
+                }}
+                style={styles.detailAvatar}
+                contentFit="cover"
+                transition={500}
+              />
+              <Text style={styles.detailName}>
+                {selectedRivalryData?.r1?.name}
+              </Text>
+            </View>
+            <Text style={styles.detailVsText}>VS</Text>
+            <View style={{ alignItems: "center" }}>
+              <Image
+                source={{
+                  uri: getWrestlerImage(selectedRivalryData?.r2?.imageUri),
+                }}
+                style={styles.detailAvatar}
+                contentFit="cover"
+                transition={500}
+              />
+              <Text style={styles.detailName}>
+                {selectedRivalryData?.r2?.name}
+              </Text>
+            </View>
           </View>
 
           <ScrollView contentContainerStyle={{ padding: 20 }}>
-            <Text style={styles.sectionLabel}>ORDENAR POR</Text>
-            <View style={styles.chipsContainer}>
-              {SORT_OPTIONS.map((opt) => (
-                <RenderChip
-                  key={opt.id}
-                  label={opt.label}
-                  value={opt.id}
-                  selectedValue={tempFilters.sortBy}
-                  defaultValue="Name"
-                  onPress={() =>
-                    setTempFilters({ ...tempFilters, sortBy: opt.id })
-                  }
-                />
-              ))}
-            </View>
-
-            <Text style={styles.sectionLabel}>ESTADO DEL CONTRATO</Text>
-            <View style={styles.chipsContainer}>
-              {STATUS_OPTIONS.map((opt) => (
-                <RenderChip
-                  key={opt.id}
-                  label={opt.label}
-                  value={opt.id}
-                  selectedValue={tempFilters.status}
-                  defaultValue="All"
-                  onPress={() =>
-                    setTempFilters({ ...tempFilters, status: opt.id })
-                  }
-                />
-              ))}
-            </View>
-
-            <Text style={styles.sectionLabel}>GÉNERO</Text>
-            <View style={styles.chipsContainer}>
-              {GENDER_OPTIONS.map((opt) => (
-                <RenderChip
-                  key={opt}
-                  label={opt}
-                  value={opt}
-                  selectedValue={tempFilters.gender}
-                  defaultValue="Todos"
-                  onPress={() =>
-                    setTempFilters({ ...tempFilters, gender: opt })
-                  }
-                />
-              ))}
-            </View>
-
-            <Text style={styles.sectionLabel}>BANDO / ROL</Text>
-            <View style={styles.chipsContainer}>
-              {ROLE_OPTIONS.map((opt) => (
-                <RenderChip
-                  key={opt}
-                  label={opt}
-                  value={opt}
-                  selectedValue={tempFilters.role}
-                  defaultValue="Todos"
-                  onPress={() => setTempFilters({ ...tempFilters, role: opt })}
-                />
-              ))}
-            </View>
-
-            <Text style={styles.sectionLabel}>ESTILO DE LUCHA</Text>
-            <View style={styles.chipsContainer}>
-              {CLASS_OPTIONS.map((opt) => (
-                <RenderChip
-                  key={opt}
-                  label={opt}
-                  value={opt}
-                  selectedValue={tempFilters.fighterClass}
-                  defaultValue="Todos"
-                  onPress={() =>
-                    setTempFilters({ ...tempFilters, fighterClass: opt })
-                  }
-                />
-              ))}
-            </View>
-
-            <View style={{ height: 40 }} />
-          </ScrollView>
-
-          <View style={styles.modalFooter}>
-            <TouchableOpacity
-              style={styles.resetBtn}
-              onPress={() =>
-                setTempFilters({
-                  sortBy: "Name",
-                  status: "All",
-                  gender: "Todos",
-                  role: "Todos",
-                  fighterClass: "Todos",
-                })
-              }
-            >
-              <Text style={styles.resetText}>Restablecer</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.applyBtn, { backgroundColor: brandTheme }]}
-              onPress={applyFilters}
-            >
-              <Text style={styles.applyText}>
-                Ver {filteredData.length} Resultados
+            <Text style={styles.sectionHeader}>MATCH HISTORY</Text>
+            {rivalryHistory.length === 0 ? (
+              <Text
+                style={{
+                  color: "#64748B",
+                  textAlign: "center",
+                  marginTop: 20,
+                  fontStyle: "italic",
+                }}
+              >
+                No matches recorded yet.
               </Text>
-            </TouchableOpacity>
-          </View>
+            ) : (
+              rivalryHistory.map((match, idx) => (
+                <View key={match.id} style={styles.historyItem}>
+                  <View style={styles.historyLeft}>
+                    <Text style={styles.historyWeek}>WK {match.week}</Text>
+                  </View>
+                  <BlurView
+                    intensity={10}
+                    tint="dark"
+                    style={styles.historyCard}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <Text style={styles.historyWinner}>
+                        Winner:{" "}
+                        <Text style={{ color: "#FFF" }}>
+                          {match.winnerName}
+                        </Text>
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <Ionicons name="star" size={12} color="#F59E0B" />
+                        <Text
+                          style={{
+                            color: "#F59E0B",
+                            fontWeight: "bold",
+                            fontSize: 12,
+                          }}
+                        >
+                          {match.rating}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.historyType}>
+                      {match.matchType} •{" "}
+                      {match.titleName ? "Title Match" : "Normal"}
+                    </Text>
+                  </BlurView>
+                </View>
+              ))
+            )}
+          </ScrollView>
         </View>
       </Modal>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F7FA" },
+const FilterChip = ({ label, selected, onPress, theme }: any) => (
+  <TouchableOpacity
+    style={[
+      styles.chip,
+      selected && { backgroundColor: theme || "#EF4444", borderColor: theme },
+    ]}
+    onPress={onPress}
+  >
+    <Text
+      style={[
+        styles.chipText,
+        selected && { color: "white", fontWeight: "bold" },
+      ]}
+    >
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
 
-  // Header
-  headerContainer: {
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#000" },
+  absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+
+  header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingBottom: 15,
-    marginTop: 0,
+    paddingTop: 10,
+    marginBottom: 20,
   },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#1E293B",
-    letterSpacing: -0.5,
-  },
-  headerSubtitle: { fontSize: 13, color: "#64748B", fontWeight: "600" },
-  iconBtn: {
-    padding: 8,
-    backgroundColor: "white",
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-  },
-
-  // Grid
-  gridContent: { paddingHorizontal: 16, paddingBottom: 100, paddingTop: 5 },
-
-  // CARD DESIGN
-  cardContainer: {
-    width: CARD_WIDTH,
-    marginBottom: 16,
-    backgroundColor: "white",
+  screenTitle: { fontSize: 34, fontWeight: "900", color: "white" },
+  filterBtn: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  cardInner: { overflow: "hidden", borderRadius: 20 },
-
-  imageContainer: {
-    height: 120,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
-    position: "relative",
   },
-  cardImage: { width: "100%", height: "100%" },
-  placeholder: {
+
+  segmentContainer: { paddingHorizontal: 20, marginBottom: 20 },
+  segmentBlur: {
+    flexDirection: "row",
+    borderRadius: 16,
+    padding: 4,
+    overflow: "hidden",
+  },
+  segmentBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderRadius: 12,
+  },
+  segmentBtnActive: { backgroundColor: "rgba(255,255,255,0.2)" },
+  segmentText: { color: "#94A3B8", fontWeight: "600", fontSize: 13 },
+  segmentTextActive: { color: "white", fontWeight: "bold" },
+
+  listContent: { paddingHorizontal: 20, paddingBottom: 150 },
+
+  cardContainer: {
+    width: CARD_WIDTH,
+    height: 200,
+    marginBottom: 20,
+    borderRadius: 20,
+    overflow: "hidden",
+  },
+  cardBlur: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 20,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    padding: 8,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  imageWrapper: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  wrestlerImage: { width: "100%", height: "100%" },
+  placeholderImage: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  placeholderText: {
+    fontSize: 40,
+    fontWeight: "900",
+    color: "rgba(255,255,255,0.1)",
+  },
+  cardInfo: { padding: 10, backgroundColor: "rgba(0,0,0,0.3)" },
+  wrestlerName: {
+    color: "white",
+    fontWeight: "800",
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  statsRow: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
+  statText: { fontSize: 10, color: "#CBD5E1", fontWeight: "600" },
+  statDivider: { fontSize: 10, color: "#64748B", marginHorizontal: 4 },
+  alignmentBar: { height: 3, width: "100%" },
+
+  titleCardContainer: {
+    marginBottom: 15,
+    borderRadius: 20,
+    overflow: "hidden",
+  },
+  titleCardBlur: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 20,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  titleInfo: { flex: 1 },
+  titleCategory: {
+    color: "#94A3B8",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  titleName: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 10,
+  },
+  holderRow: { flexDirection: "row", alignItems: "center" },
+  holderChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    padding: 4,
+    paddingRight: 12,
+    borderRadius: 20,
+  },
+  holderAvatar: { width: 24, height: 24, borderRadius: 12, marginRight: 8 },
+  holderName: { color: "white", fontSize: 12, fontWeight: "700" },
+  vacantText: { color: "#64748B", fontSize: 12, fontStyle: "italic" },
+
+  rivalryCard: { marginBottom: 15, borderRadius: 20, overflow: "hidden" },
+  rivalryBlur: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 15,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  rivalSide: { alignItems: "center", width: 80 },
+  rivalAvatar: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    justifyContent: "center",
-    alignItems: "center",
+    borderWidth: 2,
+    marginBottom: 5,
   },
-  placeholderText: { fontSize: 24, fontWeight: "bold", color: "#94A3B8" },
-
-  ringLevelBadge: {
-    position: "absolute",
-    top: 8,
-    left: 8,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
+  rivalPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#333",
+    marginBottom: 5,
   },
-  ringLevelText: { color: "white", fontWeight: "bold", fontSize: 10 },
-
-  genderBadge: {
-    position: "absolute",
-    top: 8,
-    right: 8,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
+  rivalName: {
+    color: "#FFF",
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
   },
-
-  infoContainer: { padding: 12, paddingTop: 8 },
-
-  champBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginBottom: 6,
-    gap: 4,
-  },
-  champBannerText: {
-    color: "white",
-    fontSize: 9,
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    flex: 1,
-  },
-
-  cardName: {
+  rivalCenter: { flex: 1, alignItems: "center", paddingHorizontal: 10 },
+  vsText: {
+    color: "#64748B",
     fontSize: 14,
-    fontWeight: "800",
-    color: "#1E293B",
-    marginBottom: 6,
+    fontWeight: "900",
+    fontStyle: "italic",
+    marginBottom: 5,
   },
-
-  statsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
+  heatMeterContainer: {
+    width: "100%",
+    height: 6,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 3,
+    overflow: "hidden",
+    marginBottom: 5,
   },
-  recordBadge: {
-    backgroundColor: "#F1F5F9",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  recordText: { fontSize: 10, fontWeight: "700" },
-
-  alignBadge: {
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  alignText: { fontSize: 9, fontWeight: "800" },
-  classText: { fontSize: 10, color: "#64748B", fontWeight: "600" },
-
-  contractLabel: { fontSize: 9, color: "#94A3B8", fontWeight: "600" },
-  contractValue: { fontSize: 9, fontWeight: "700" },
-  contractBarBg: {
-    height: 3,
-    backgroundColor: "#E2E8F0",
-    borderRadius: 2,
-    marginTop: 2,
-  },
-  contractBarFill: { height: "100%", borderRadius: 2 },
+  heatMeterFill: { height: "100%", borderRadius: 3 },
+  heatText: { fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  deleteRivalryBtn: { position: "absolute", top: 10, right: 10, padding: 5 },
 
   emptyState: { alignItems: "center", marginTop: 50 },
-  emptyText: { color: "#94A3B8", marginTop: 10, fontSize: 14 },
+  emptyText: { color: "rgba(255,255,255,0.3)", marginTop: 10, fontSize: 14 },
 
-  fab: { position: "absolute", bottom: 110, right: 20, zIndex: 50 },
+  fab: { position: "absolute", bottom: 120, right: 20 },
   fabGradient: {
     width: 56,
     height: 56,
     borderRadius: 28,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#3B82F6",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 5,
-    zIndex: 50,
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
   },
 
-  // MODAL STYLES
-  modalContent: {
-    flex: 1,
-    backgroundColor: "#F5F7FA",
-    marginTop: 50,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
+  modalContainer: { flex: 1 },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     padding: 20,
-    backgroundColor: "white",
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderBottomColor: "rgba(255,255,255,0.1)",
+    marginTop: 60,
   },
-  modalTitle: { fontSize: 18, fontWeight: "800", color: "#1E293B" },
-
-  sectionLabel: {
+  modalTitle: { color: "white", fontSize: 20, fontWeight: "800" },
+  modalScroll: { padding: 20 },
+  filterLabel: {
+    color: "#94A3B8",
     fontSize: 12,
     fontWeight: "700",
-    color: "#94A3B8",
-    marginTop: 20,
-    marginBottom: 10,
     textTransform: "uppercase",
+    marginBottom: 12,
+    marginTop: 10,
   },
-  chipsContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-
-  // CHIP STYLES
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: "white",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255,255,255,0.05)",
   },
-  chipText: { fontSize: 12, fontWeight: "600", color: "#64748B" },
-
-  // Active (Selected but NOT default)
-  // Nota: Esto se sobreescribe en linea en el componente RenderChip para usar brandTheme
-
-  chipTextActive: { color: "white" },
-
-  // Default Selected (Selected but IS default) - Discrete
-  chipDefaultSelected: {
-    backgroundColor: "#E2E8F0",
-    borderColor: "#CBD5E1",
-  },
-  chipTextDefaultSelected: { color: "#334155", fontWeight: "bold" },
-
+  chipText: { color: "#CBD5E1", fontSize: 12, fontWeight: "600" },
   modalFooter: {
     padding: 20,
-    backgroundColor: "white",
     borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
-    flexDirection: "row",
-    gap: 15,
+    borderTopColor: "rgba(255,255,255,0.1)",
   },
-  resetBtn: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: "#F1F5F9",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  resetText: { fontWeight: "600", color: "#64748B" },
-  applyBtn: {
+  applyBtn: { paddingVertical: 16, borderRadius: 16, alignItems: "center" },
+  applyBtnText: { color: "white", fontWeight: "bold", fontSize: 16 },
+
+  modalOverlay: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    // Background color dinámico en el render
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.8)",
   },
-  applyText: { fontWeight: "bold", color: "white", fontSize: 16 },
+  glassModalContent: {
+    backgroundColor: "rgba(0,0,0,0.9)",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 40,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  pickerLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#94A3B8",
+    marginBottom: 12,
+    marginTop: 10,
+    letterSpacing: 1,
+  },
+  avatarPick: {
+    marginRight: 15,
+    alignItems: "center",
+    width: 70,
+    opacity: 0.6,
+  },
+  avatarImg: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#333",
+  },
+  avatarName: {
+    fontSize: 10,
+    color: "#CBD5E1",
+    marginTop: 5,
+    textAlign: "center",
+    fontWeight: "600",
+  },
+
+  detailHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.1)",
+  },
+  detailTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#FFF",
+    letterSpacing: 1,
+  },
+  detailVsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    paddingVertical: 30,
+  },
+  detailAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: "#FFF",
+  },
+  detailName: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
+  detailVsText: {
+    fontSize: 24,
+    fontWeight: "900",
+    color: "#64748B",
+    fontStyle: "italic",
+  },
+  sectionHeader: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#94A3B8",
+    marginBottom: 15,
+    letterSpacing: 1,
+  },
+  historyItem: { flexDirection: "row", marginBottom: 15 },
+  historyLeft: { width: 50, alignItems: "center", paddingTop: 10 },
+  historyWeek: { color: "#64748B", fontWeight: "bold", fontSize: 12 },
+  historyCard: {
+    flex: 1,
+    borderRadius: 12,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  historyWinner: { color: "#94A3B8", fontSize: 12, fontWeight: "bold" },
+  historyType: { color: "#64748B", fontSize: 10, marginTop: 5 },
 });

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "MyGMAdmin",
-    "slug": "MyGMAdmin",
+    "name": "MyGM Evolution",
+    "slug": "mygm-v2",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -48,9 +48,15 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "fd3d2923-4e65-4810-bada-f48bf9897fb6"
+        "projectId": ""
       }
     },
-    "owner": "eldeivid"
+    "owner": "eldeivid",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/fd3d2923-4e65-4810-bada-f48bf9897fb6"
+    }
   }
 }

@@ -415,9 +415,13 @@ export const processMatchV4 = (
 
       const dbTitleName = isTitleMatch && titleId ? `Title ${titleId}` : null;
 
+      // CORRECCIÓN AQUÍ: 11 columnas, 11 signos de interrogación
       db.runSync(
-        `INSERT INTO match_history (save_id, week, matchType, winnerId, winnerName, loserName, rating, isTitleChange, titleName, event_date, participants) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO match_history (
+          save_id, week, matchType, winnerId, winnerName, 
+          loserName, rating, isTitleChange, titleName, 
+          event_date, participants
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           saveId,
           week,
@@ -426,7 +430,7 @@ export const processMatchV4 = (
           winnerName,
           loserNames,
           stars,
-          0,
+          0, // isTitleChange inicial
           dbTitleName,
           new Date().toISOString(),
           participantsData,
@@ -438,7 +442,7 @@ export const processMatchV4 = (
       );
       const matchHistoryId = lastMatch?.id;
 
-      // Stats (No necesitan save_id en el WHERE porque el ID del luchador es único)
+      // Actualizar Victorias/Derrotas
       winnerIds.forEach((id) => {
         db.runSync(
           `UPDATE luchadores SET normalWins = normalWins + 1 WHERE id = ?`,
@@ -452,13 +456,14 @@ export const processMatchV4 = (
         );
       });
 
-      // Títulos
+      // Lógica de Títulos
       if (isTitleMatch && titleId) {
         const title: any = db.getFirstSync(
-          "SELECT holderId1, holderId2 FROM titles WHERE id = ?",
+          "SELECT holderId1, holderId2, weekWon FROM titles WHERE id = ?",
           [titleId]
         );
 
+        // Si el ganador NO es el campeón actual (Cambio de título)
         if (title && !winnerIds.includes(title.holderId1)) {
           titleChanged = true;
           const newHolder1 = winnerIds[0];
@@ -494,7 +499,7 @@ export const processMatchV4 = (
         }
       }
 
-      // Finanzas
+      // Cobrar costo de estipulación/producción
       if (stipulationCost > 0) {
         db.runSync(
           `UPDATE saves SET currentCash = currentCash - ? WHERE id = ?`,
@@ -541,21 +546,35 @@ export const addPlannedMatch = (
       "SELECT currentWeek FROM saves WHERE id = ?",
       [saveId]
     );
+    const week = state?.currentWeek || 1;
+
+    // Calcular el siguiente orden para que aparezca al final
+    const maxSort: any = db.getFirstSync(
+      "SELECT MAX(sort_order) as maxOrder FROM planned_matches WHERE save_id = ? AND week = ?",
+      [saveId, week]
+    );
+    const nextOrder = (maxSort?.maxOrder || 0) + 1;
+
     db.runSync(
-      `INSERT INTO planned_matches (save_id, week, matchType, participantsJson, stipulation, cost, isTitleMatch, titleId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO planned_matches (
+         save_id, week, matchType, participantsJson, stipulation, cost, 
+         isTitleMatch, titleId, sort_order
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         saveId,
-        state.currentWeek,
+        week,
         matchType,
         JSON.stringify(participants),
         stipulation,
         cost,
         isTitleMatch ? 1 : 0,
         titleId,
+        nextOrder, // <--- Guardamos el orden
       ]
     );
     return true;
   } catch (e) {
+    console.error("Error adding match:", e);
     return false;
   }
 };
@@ -567,7 +586,8 @@ export const getPlannedMatchesForCurrentWeek = (saveId: number) => {
       [saveId]
     );
     const matches = db.getAllSync(
-      "SELECT * FROM planned_matches WHERE save_id = ? AND week = ? ORDER BY id ASC",
+      // CAMBIO IMPORTANTE: ORDER BY sort_order ASC
+      "SELECT * FROM planned_matches WHERE save_id = ? AND week = ? ORDER BY sort_order ASC",
       [saveId, state?.currentWeek || 1]
     );
     return matches.map((m: any) => ({
@@ -663,7 +683,6 @@ export const resolveMatch = (
         }
       });
     } else {
-      console.warn("Winner ID not found in teams, applying fallback.");
       const allParticipants: any[] = [];
       teams.forEach((t: any) => allParticipants.push(...t));
       const foundWinner = allParticipants.find((p) => p.id === winnerId);
@@ -680,13 +699,10 @@ export const resolveMatch = (
     const winnerName = winners.map((p) => p.name).join(" & ");
     const loserNames = losers.map((p) => p.name).join(" & ");
 
-    const stipulationName =
-      matchData.stipulation || matchData.matchType || "Normal";
-
     const result = processMatchV4(
       saveId,
       matchData.matchType,
-      stipulationName,
+      matchData.stipulation || "Normal",
       matchData.cost || 0,
       winnerId,
       winnerName,
@@ -699,16 +715,27 @@ export const resolveMatch = (
     );
 
     if (result.success) {
+      // --- LÓGICA V2: LOG DE DEFENSA ---
+      // Si era lucha titular y NO hubo cambio de título, es una defensa exitosa
+      if (matchData.isTitleMatch === 1 && !result.titleChanged) {
+        recordTitleDefense(
+          saveId,
+          matchData.titleId,
+          winnerIds[0],
+          winnerIds[1] || null,
+          rating
+        );
+      }
+
       const resultText = `Ganador: ${winnerName} (${rating} ⭐)`;
       db.runSync(
         "UPDATE planned_matches SET isCompleted = 1, resultText = ? WHERE id = ?",
         [resultText, matchId]
       );
 
-      return { success: true, revenue: 0, isTitleChange: result.titleChanged };
-    } else {
-      return { success: false };
+      return { success: true, isTitleChange: result.titleChanged };
     }
+    return { success: false };
   } catch (e) {
     console.error("Error en resolveMatch:", e);
     return { success: false };
@@ -1086,5 +1113,281 @@ export const deleteSave = (saveId: number) => {
     return true;
   } catch (e) {
     return false;
+  }
+};
+
+// ==========================================
+// 12. GESTIÓN DE RIVALIDADES (NUEVO V2)
+// ==========================================
+
+/**
+ * Obtiene todas las rivalidades activas de la partida actual
+ */
+export const getActiveRivalries = (saveId: number) => {
+  try {
+    return db.getAllSync(
+      `
+      SELECT r.*, 
+             l1.name as name1, l1.imageUri as image1,
+             l2.name as name2, l2.imageUri as image2
+      FROM rivalries r
+      JOIN luchadores l1 ON r.luchador_id1 = l1.id
+      JOIN luchadores l2 ON r.luchador_id2 = l2.id
+      WHERE r.save_id = ? AND r.is_active = 1
+    `,
+      [saveId]
+    );
+  } catch (e) {
+    return [];
+  }
+};
+
+/**
+ * Inicia una nueva rivalidad o sube el nivel si ya existe
+ */
+export const startOrLevelUpRivalry = (
+  saveId: number,
+  id1: number,
+  id2: number
+) => {
+  try {
+    const state: any = getGameState(saveId);
+    // Buscamos si ya existe una rivalidad activa entre estos dos
+    const existing: any = db.getFirstSync(
+      `
+      SELECT id, level FROM rivalries 
+      WHERE save_id = ? AND is_active = 1 
+      AND ((luchador_id1 = ? AND luchador_id2 = ?) OR (luchador_id1 = ? AND luchador_id2 = ?))
+    `,
+      [saveId, id1, id2, id2, id1]
+    );
+
+    if (existing) {
+      if (existing.level < 4) {
+        db.runSync("UPDATE rivalries SET level = level + 1 WHERE id = ?", [
+          existing.id,
+        ]);
+        return { action: "leveled_up", newLevel: existing.level + 1 };
+      }
+      return { action: "max_level", newLevel: 4 };
+    } else {
+      db.runSync(
+        `
+        INSERT INTO rivalries (save_id, luchador_id1, luchador_id2, level, created_week)
+        VALUES (?, ?, ?, 1, ?)
+      `,
+        [saveId, id1, id2, state.currentWeek]
+      );
+      return { action: "started", newLevel: 1 };
+    }
+  } catch (e) {
+    console.error("Error en rivalidad:", e);
+    return null;
+  }
+};
+
+/**
+ * Finaliza una rivalidad (útil para el "Blowoff" en un PPV)
+ */
+export const endRivalry = (rivalryId: number) => {
+  try {
+    db.runSync("UPDATE rivalries SET is_active = 0 WHERE id = ?", [rivalryId]);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+// ==========================================
+// 13. LOG DE TÍTULOS - DEFENSAS (NUEVO V2)
+// ==========================================
+
+/**
+ * Registra una defensa exitosa en el log
+ */
+export const recordTitleDefense = (
+  saveId: number,
+  titleId: number,
+  h1: number,
+  h2: number | null,
+  stars: number
+) => {
+  try {
+    const state: any = getGameState(saveId);
+    db.runSync(
+      `
+      INSERT INTO title_defenses (save_id, title_id, holder_id1, holder_id2, week, match_rating)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `,
+      [saveId, titleId, h1, h2, state.currentWeek, stars]
+    );
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+/**
+ * Obtiene el conteo de defensas exitosas de un reinado actual
+ */
+export const getDefenseCount = (titleId: number, holderId1: number) => {
+  try {
+    const result: any = db.getFirstSync(
+      `
+      SELECT COUNT(*) as total FROM title_defenses 
+      WHERE title_id = ? AND holder_id1 = ?
+    `,
+      [titleId, holderId1]
+    );
+    return result?.total || 0;
+  } catch (e) {
+    return 0;
+  }
+};
+
+// ==========================================
+// 14. GESTIÓN MANUAL DE RIVALIDADES (NUEVO)
+// ==========================================
+
+export const createRivalry = (
+  saveId: number,
+  id1: number,
+  id2: number,
+  level: number = 1
+) => {
+  try {
+    const state: any = getGameState(saveId);
+    // Verificar si ya existe (activa o inactiva)
+    const existing: any = db.getFirstSync(
+      `SELECT id FROM rivalries 
+       WHERE save_id = ? 
+       AND ((luchador_id1 = ? AND luchador_id2 = ?) OR (luchador_id1 = ? AND luchador_id2 = ?))`,
+      [saveId, id1, id2, id2, id1]
+    );
+
+    if (existing) {
+      // Si existe, la reactivamos y reseteamos el nivel
+      db.runSync(
+        `UPDATE rivalries SET is_active = 1, level = ?, created_week = ? WHERE id = ?`,
+        [level, state.currentWeek, existing.id]
+      );
+    } else {
+      // Si no existe, creamos una nueva
+      db.runSync(
+        `INSERT INTO rivalries (save_id, luchador_id1, luchador_id2, level, created_week, is_active)
+         VALUES (?, ?, ?, ?, ?, 1)`,
+        [saveId, id1, id2, level, state.currentWeek]
+      );
+    }
+    return true;
+  } catch (e) {
+    console.error("Error creating rivalry:", e);
+    return false;
+  }
+};
+
+export const deleteRivalry = (rivalryId: number) => {
+  try {
+    // Soft delete (la marcamos como inactiva)
+    db.runSync("UPDATE rivalries SET is_active = 0 WHERE id = ?", [rivalryId]);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+// ==========================================
+// 15. HISTORIAL DE RIVALIDAD (NUEVO)
+// ==========================================
+
+export const getRivalryMatches = (saveId: number, id1: number, id2: number) => {
+  try {
+    // Buscamos matches donde uno ganó y el otro perdió, O donde participaron ambos (en equipo o contra)
+    // Para simplificar, buscamos matches donde el winnerId sea uno y en los participantes esté el otro como perdedor
+    // Nota: Esto depende de cómo guardes el JSON de participantes.
+    // Una forma más simple es buscar por texto en 'participants' si es un JSON string
+
+    // SQL simple: Buscar en match_history donde winnerId sea A o B
+    const rows = db.getAllSync(
+      `SELECT * FROM match_history 
+       WHERE save_id = ? 
+       AND (
+         (winnerId = ? AND participants LIKE ?) 
+         OR 
+         (winnerId = ? AND participants LIKE ?)
+       )
+       ORDER BY week DESC`,
+      [saveId, id1, `%${id2}%`, id2, `%${id1}%`]
+    );
+    return rows;
+  } catch (e) {
+    console.error("Error fetching rivalry history:", e);
+    return [];
+  }
+};
+// ==========================================
+// 16. REORDER MATCHES (NUEVO)
+// ==========================================
+
+export const reorderMatches = (saveId: number, newOrderMatches: any[]) => {
+  try {
+    db.withTransactionSync(() => {
+      newOrderMatches.forEach((match, index) => {
+        // Actualizamos solo el sort_order basándonos en la posición del array
+        db.runSync("UPDATE planned_matches SET sort_order = ? WHERE id = ?", [
+          index,
+          match.id,
+        ]);
+      });
+    });
+    return true;
+  } catch (e) {
+    console.error("Error reordering matches:", e);
+    return false;
+  }
+};
+// ==========================================
+// 🛠️ UTILIDAD: AUTO-MAPEO DE IMÁGENES
+// ==========================================
+export const autoMapRosterImages = (saveId: number) => {
+  try {
+    const roster = getAllLuchadores(saveId);
+    let updatedCount = 0;
+
+    console.log(`🔴 --- INICIO AUDITORÍA (Save ID: ${saveId}) ---`);
+
+    db.withTransactionSync(() => {
+      roster.forEach((wrestler) => {
+        // 1. Calcular el nombre limpio
+        const cleanName = wrestler.name.toLowerCase().replace(/\s+/g, "");
+        const newImageUri = `${cleanName}.webp`;
+
+        // 2. Imprimir QUÉ tiene actualmente vs QUÉ va a guardar
+        console.log(`🤼 Luchador: "${wrestler.name}"`);
+        console.log(`   - Antes tenía: ${wrestler.imageUri || "NADA"}`);
+        console.log(`   - Ahora guardaré: ${newImageUri}`);
+
+        // 3. Guardar
+        db.runSync("UPDATE luchadores SET imageUri = ? WHERE id = ?", [
+          newImageUri,
+          wrestler.id,
+        ]);
+
+        // 4. Confirmar que se guardó leyendo de nuevo
+        const check: any = db.getFirstSync(
+          "SELECT imageUri FROM luchadores WHERE id = ?",
+          [wrestler.id]
+        );
+        console.log(`   ✅ Dato final en DB: ${check.imageUri}`);
+
+        updatedCount++;
+      });
+    });
+
+    console.log("🔴 --- FIN AUDITORÍA ---");
+    return updatedCount;
+  } catch (e) {
+    console.error("❌ Error en auto-mapeo:", e);
+    return 0;
   }
 };

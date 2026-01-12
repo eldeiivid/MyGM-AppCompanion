@@ -1,4 +1,5 @@
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   Stack,
@@ -12,7 +13,6 @@ import {
   FlatList,
   Image,
   Modal,
-  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -20,8 +20,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ManagementHeader } from "../../src/components/ManagementHeader";
-import { useGame } from "../../src/context/GameContext"; // <--- 1. IMPORTAR CONTEXTO
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useGame } from "../../src/context/GameContext";
 import {
   assignTitleWithHistory,
   getAllLuchadores,
@@ -37,25 +37,23 @@ const { width } = Dimensions.get("window");
 export default function TitleDetailHistoryScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const { saveId } = useGame(); // <--- 2. USAR CONTEXTO
+  const { saveId, brandTheme } = useGame();
 
-  // Estados de Datos
+  // Data States
   const [history, setHistory] = useState<any[]>([]);
   const [currentTitle, setCurrentTitle] = useState<Title | null>(null);
   const [currentWeek, setCurrentWeek] = useState(1);
   const [roster, setRoster] = useState<Luchador[]>([]);
   const [allMatches, setAllMatches] = useState<any[]>([]);
-
-  // Mapa de imágenes
   const [luchadorImages, setLuchadorImages] = useState<
     Record<number, string | null>
   >({});
 
-  // Estados de Gestión (Asignación)
+  // Management States
   const [modalVisible, setModalVisible] = useState(false);
   const [tagSelection, setTagSelection] = useState<number[]>([]);
 
-  // Estados de Visualización (Defensas)
+  // Defense Visualization States
   const [defensesModalVisible, setDefensesModalVisible] = useState(false);
   const [selectedDefenses, setSelectedDefenses] = useState<any[]>([]);
   const [selectedChampName, setSelectedChampName] = useState("");
@@ -63,10 +61,9 @@ export default function TitleDetailHistoryScreen() {
   const loadData = () => {
     if (!saveId) return;
 
-    // 3. PASAR SAVE_ID A TODAS LAS FUNCIONES DE DB
     const allTitles = getAllTitles(saveId) as Title[];
     const title = allTitles.find((t) => t.id === Number(id)) || null;
-    const hist = getTitleHistory(saveId, Number(id)); // <--- saveId aquí también
+    const hist = getTitleHistory(saveId, Number(id));
     const state = getGameState(saveId) as { currentWeek: number };
     const allLuchadores = getAllLuchadores(saveId) as Luchador[];
     const matches = getAllMatches(saveId);
@@ -95,7 +92,7 @@ export default function TitleDetailHistoryScreen() {
     return (end - start + 1) * 7;
   };
 
-  // --- OBTENER LISTA DE DEFENSAS ---
+  // --- DEFENSE LOGIC ---
   const getDefenseMatches = (
     champId: number,
     weekStart: number,
@@ -104,10 +101,7 @@ export default function TitleDetailHistoryScreen() {
     if (!currentTitle) return [];
 
     return allMatches.filter((m) => {
-      // Nota: titleName en matches se guarda como "Title {id}"
-      // Aseguramos que coincida con el ID actual
       const isThisTitle = m.titleName === `Title ${currentTitle.id}`;
-      // isTitleChange === 0 significa que NO cambió de manos (Defensa Exitosa)
       const isSuccessfulDefense = m.isTitleChange === 0;
       const inTimeRange = m.week >= weekStart && m.week <= weekEnd;
 
@@ -141,7 +135,6 @@ export default function TitleDetailHistoryScreen() {
 
   const handleAssign = (id1: number, id2: number | null = null) => {
     if (currentTitle && saveId) {
-      // 4. PASAR SAVE_ID AL ASIGNAR
       assignTitleWithHistory(saveId, currentTitle.id, id1, id2);
       setModalVisible(false);
       setTagSelection([]);
@@ -164,256 +157,340 @@ export default function TitleDetailHistoryScreen() {
       currentTitle.name.includes("World") ||
       currentTitle.name.includes("Universal")
     )
-      return ["#B45309", "#78350F"];
-    if (currentTitle.category === "Tag") return ["#334155", "#0F172A"];
-    return ["#64748B", "#334155"];
+      return ["#B45309", "#78350F"]; // Gold
+    if (currentTitle.category === "Tag") return ["#334155", "#0F172A"]; // Slate
+    return ["#BE185D", "#831843"]; // Pink/Red for others
   };
 
+  const titleColor = getGradientColors()[0];
+
   return (
-    <View style={styles.mainContainer}>
+    <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" />
 
-      <ManagementHeader />
+      {/* Global Background */}
+      <View style={[styles.absoluteFill, { backgroundColor: "#000" }]} />
+      <LinearGradient
+        colors={[titleColor, "transparent"]}
+        style={[styles.absoluteFill, { height: "50%", opacity: 0.3 }]}
+      />
 
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={{ paddingBottom: 100 }}
-      >
-        {/* HERO CARD */}
-        <LinearGradient
-          colors={getGradientColors() as any}
-          style={styles.heroCard}
-        >
-          <View style={styles.navRow}>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={styles.backBtn}
-            >
-              <Ionicons name="arrow-back" size={24} color="white" />
-            </TouchableOpacity>
-            <Text style={styles.heroTitle}>FICHA DE CAMPEONATO</Text>
-            <View style={{ width: 40 }} />
-          </View>
-
-          <View style={styles.heroContent}>
-            <MaterialCommunityIcons
-              name={currentTitle?.isMITB ? "briefcase" : "trophy"}
-              size={80}
-              color="rgba(255,255,255,0.9)"
-            />
-            <Text style={styles.titleName}>{currentTitle?.name}</Text>
-            <Text style={styles.titleCat}>
-              {currentTitle?.category} Division
-            </Text>
-          </View>
-        </LinearGradient>
-
-        {/* CAMPEÓN ACTUAL */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>REINADO ACTUAL</Text>
-          {currentTitle?.holderName1 && (
-            <View style={{ flexDirection: "row", gap: 5 }}>
-              <View style={[styles.daysBadge, { backgroundColor: "#3B82F6" }]}>
-                <Text style={styles.daysText}>
-                  🛡️{" "}
-                  {
-                    getDefenseMatches(
-                      currentTitle.holderId1!,
-                      currentTitle.weekWon,
-                      currentWeek
-                    ).length
-                  }{" "}
-                  Def.
-                </Text>
-              </View>
-              <View style={styles.daysBadge}>
-                <Text style={styles.daysText}>
-                  {calculateDays(currentTitle?.weekWon, currentWeek)} Días
-                </Text>
-              </View>
-            </View>
-          )}
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* HEADER */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.iconBtn}
+          >
+            <Ionicons name="arrow-back" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>TITLE LINEAGE</Text>
+          <View style={{ width: 40 }} />
         </View>
 
-        <View style={styles.championCard}>
-          {currentTitle?.holderName1 ? (
-            // Al hacer click en el campeón actual, también vemos sus defensas
-            <TouchableOpacity
-              style={styles.champRow}
-              onPress={() =>
-                handleShowDefenses(
-                  currentTitle.holderId1!,
-                  currentTitle.holderName1 || "Campeón",
-                  currentTitle.weekWon,
-                  currentWeek
-                )
-              }
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 100 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* HERO SECTION */}
+          <View style={styles.heroContainer}>
+            <View
+              style={[
+                styles.iconCircle,
+                { borderColor: titleColor, backgroundColor: titleColor + "20" },
+              ]}
             >
-              <View style={styles.avatarContainer}>
-                {luchadorImages[currentTitle.holderId1!] ? (
-                  <Image
-                    source={{ uri: luchadorImages[currentTitle.holderId1!]! }}
-                    style={styles.champAvatar}
-                  />
-                ) : (
-                  <View style={styles.champPlaceholder}>
-                    <Text style={styles.initial}>
-                      {currentTitle.holderName1.charAt(0)}
-                    </Text>
-                  </View>
-                )}
-                {currentTitle.holderId2 && (
-                  <View style={styles.secondAvatar}>
-                    {luchadorImages[currentTitle.holderId2] ? (
+              <Text style={{ fontSize: 40 }}>
+                {currentTitle?.isMITB ? "💼" : "🏆"}
+              </Text>
+            </View>
+            <Text style={styles.titleName}>{currentTitle?.name}</Text>
+            <Text style={[styles.titleCategory, { color: titleColor }]}>
+              {currentTitle?.category.toUpperCase()} DIVISION
+            </Text>
+          </View>
+
+          {/* CURRENT CHAMPION CARD */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionLabel}>CURRENT REIGN</Text>
+
+            {currentTitle?.holderName1 ? (
+              <BlurView
+                intensity={20}
+                tint="dark"
+                style={[styles.championCard, { borderColor: titleColor }]}
+              >
+                <TouchableOpacity
+                  style={styles.champRow}
+                  onPress={() =>
+                    handleShowDefenses(
+                      currentTitle.holderId1!,
+                      currentTitle.holderName1 || "Champion",
+                      currentTitle.weekWon,
+                      currentWeek
+                    )
+                  }
+                >
+                  <View style={styles.avatarContainer}>
+                    {luchadorImages[currentTitle.holderId1!] ? (
                       <Image
                         source={{
-                          uri: luchadorImages[currentTitle.holderId2]!,
+                          uri: luchadorImages[currentTitle.holderId1!]!,
                         }}
                         style={styles.champAvatar}
                       />
                     ) : (
-                      <View style={styles.champPlaceholder}>
+                      <View
+                        style={[
+                          styles.champPlaceholder,
+                          { borderColor: titleColor },
+                        ]}
+                      >
                         <Text style={styles.initial}>
-                          {currentTitle.holderName2!.charAt(0)}
+                          {currentTitle.holderName1.charAt(0)}
                         </Text>
                       </View>
                     )}
+                    {/* Secondary Holder for Tag Teams */}
+                    {currentTitle.holderId2 && (
+                      <View style={styles.secondAvatar}>
+                        {luchadorImages[currentTitle.holderId2] ? (
+                          <Image
+                            source={{
+                              uri: luchadorImages[currentTitle.holderId2]!,
+                            }}
+                            style={styles.champAvatar}
+                          />
+                        ) : (
+                          <View
+                            style={[
+                              styles.champPlaceholder,
+                              { borderColor: titleColor },
+                            ]}
+                          >
+                            <Text style={styles.initial}>
+                              {currentTitle.holderName2!.charAt(0)}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
                   </View>
-                )}
-              </View>
 
-              <View style={styles.champInfo}>
-                <Text style={styles.champLabel}>CAMPEÓN</Text>
-                <Text style={styles.champName}>
-                  {currentTitle.holderName1}
-                  {currentTitle.holderName2 && ` & ${currentTitle.holderName2}`}
-                </Text>
-                <Text style={styles.sinceText}>
-                  Toca para ver historial de defensas
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#CBD5E1" />
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.vacantBox}>
-              <Ionicons name="alert-circle-outline" size={32} color="#EF4444" />
-              <Text style={styles.vacantTitle}>TÍTULO VACANTE</Text>
-              <Text style={styles.vacantSub}>
-                Este campeonato no tiene dueño actualmente.
-              </Text>
-            </View>
-          )}
+                  <View style={styles.champInfo}>
+                    <Text style={[styles.champLabel, { color: titleColor }]}>
+                      CURRENT CHAMPION
+                    </Text>
+                    <Text style={styles.champName}>
+                      {currentTitle.holderName1}
+                      {currentTitle.holderName2 &&
+                        ` & ${currentTitle.holderName2}`}
+                    </Text>
 
-          <TouchableOpacity
-            style={styles.actionBtn}
-            onPress={() => {
-              setTagSelection([]);
-              setModalVisible(true);
-            }}
-          >
-            <Text style={styles.actionBtnText}>
-              {currentTitle?.holderName1
-                ? "CAMBIAR CAMPEÓN (FORZADO)"
-                : "CORONAR NUEVO CAMPEÓN"}
-            </Text>
-          </TouchableOpacity>
-        </View>
+                    <View style={styles.statsBadgeRow}>
+                      <View style={styles.statBadge}>
+                        <Ionicons name="time-outline" size={10} color="#FFF" />
+                        <Text style={styles.statText}>
+                          {calculateDays(currentTitle.weekWon, currentWeek)}{" "}
+                          Days
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.statBadge,
+                          { backgroundColor: titleColor + "40" },
+                        ]}
+                      >
+                        <Ionicons
+                          name="shield-checkmark"
+                          size={10}
+                          color={titleColor}
+                        />
+                        <Text style={[styles.statText, { color: titleColor }]}>
+                          {
+                            getDefenseMatches(
+                              currentTitle.holderId1!,
+                              currentTitle.weekWon,
+                              currentWeek
+                            ).length
+                          }{" "}
+                          Defenses
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color="rgba(255,255,255,0.3)"
+                  />
+                </TouchableOpacity>
 
-        {/* LINAJE (HISTORIAL) */}
-        <Text style={[styles.sectionTitle, { marginLeft: 20, marginTop: 30 }]}>
-          LINAJE DEL TÍTULO
-        </Text>
-
-        {history.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>
-              No hay historia registrada aún.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.timelineContainer}>
-            {history.map((item, index) => (
-              <View key={item.id} style={styles.historyItem}>
-                <View style={styles.timelineLeft}>
-                  <View style={styles.dot} />
-                  {index !== history.length - 1 && <View style={styles.line} />}
-                </View>
-
-                {/* TARJETA DE REINADO CLICKEABLE */}
                 <TouchableOpacity
-                  style={styles.historyCard}
-                  onPress={() =>
-                    handleShowDefenses(
-                      item.luchadorId1,
-                      item.exChamp1 || "Campeón",
-                      item.weekWon,
-                      item.weekLost
-                    )
-                  }
+                  style={styles.actionBtn}
+                  onPress={() => {
+                    setTagSelection([]);
+                    setModalVisible(true);
+                  }}
                 >
-                  <View style={styles.historyHeader}>
-                    <Text style={styles.historyNames}>
-                      {item.exChamp1}{" "}
-                      {item.exChamp2 ? `& ${item.exChamp2}` : ""}
-                    </Text>
-                    <Text style={styles.historyDefenses}>
-                      🛡️{" "}
-                      {
-                        getDefenseMatches(
-                          item.luchadorId1,
-                          item.weekWon,
-                          item.weekLost
-                        ).length
-                      }
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "space-between",
+                  <Text style={styles.actionBtnText}>FORCE TITLE CHANGE</Text>
+                </TouchableOpacity>
+              </BlurView>
+            ) : (
+              <BlurView
+                intensity={20}
+                tint="dark"
+                style={[styles.championCard, { borderColor: "#EF4444" }]}
+              >
+                <View style={styles.vacantBox}>
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={40}
+                    color="#EF4444"
+                  />
+                  <Text style={styles.vacantTitle}>VACANT TITLE</Text>
+                  <Text style={styles.vacantSub}>
+                    This championship has no holder.
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.actionBtn,
+                      { backgroundColor: "#EF4444", marginTop: 15 },
+                    ]}
+                    onPress={() => {
+                      setTagSelection([]);
+                      setModalVisible(true);
                     }}
                   >
-                    <Text style={styles.historySub}>
-                      Sem. {item.weekWon} - {item.weekLost}
-                    </Text>
-                    <Text style={styles.historyDays}>
-                      {calculateDays(item.weekWon, item.weekLost)} días
-                    </Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.historySub,
-                      { marginTop: 4, fontStyle: "italic" },
-                    ]}
-                  >
-                    Perdió vs{" "}
-                    <Text style={{ fontWeight: "bold", color: "#1E293B" }}>
-                      {item.winner1} {item.winner2 ? `& ${item.winner2}` : ""}
-                    </Text>
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+                    <Text style={styles.actionBtnText}>CROWN NEW CHAMPION</Text>
+                  </TouchableOpacity>
+                </View>
+              </BlurView>
+            )}
           </View>
-        )}
-      </ScrollView>
 
-      {/* --- MODAL DE SELECCIÓN DE CAMPEÓN --- */}
+          {/* HISTORY LOG */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionLabel}>TITLE HISTORY</Text>
+
+            {history.length === 0 ? (
+              <View style={styles.emptyLog}>
+                <Text style={styles.emptyText}>No history records yet.</Text>
+              </View>
+            ) : (
+              <View style={styles.timelineContainer}>
+                {history.map((item, index) => (
+                  <View key={item.id} style={styles.historyRow}>
+                    {/* Timeline */}
+                    <View style={styles.timelineLeft}>
+                      <View
+                        style={[
+                          styles.dot,
+                          {
+                            backgroundColor:
+                              index === 0 ? titleColor : "#475569",
+                          },
+                        ]}
+                      />
+                      {index !== history.length - 1 && (
+                        <View style={styles.line} />
+                      )}
+                    </View>
+
+                    {/* Card */}
+                    <TouchableOpacity
+                      style={styles.historyCardContainer}
+                      onPress={() =>
+                        handleShowDefenses(
+                          item.luchadorId1,
+                          item.exChamp1 || "Champ",
+                          item.weekWon,
+                          item.weekLost
+                        )
+                      }
+                    >
+                      <BlurView
+                        intensity={10}
+                        tint="dark"
+                        style={styles.historyCard}
+                      >
+                        <View style={styles.historyHeader}>
+                          <Text style={styles.historyName}>
+                            {item.exChamp1}{" "}
+                            {item.exChamp2 ? `& ${item.exChamp2}` : ""}
+                          </Text>
+                          <View
+                            style={[
+                              styles.miniStatBadge,
+                              { backgroundColor: "#10B98120" },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.miniStatText,
+                                { color: "#10B981" },
+                              ]}
+                            >
+                              {calculateDays(item.weekWon, item.weekLost)} Days
+                            </Text>
+                          </View>
+                        </View>
+
+                        <Text style={styles.historySub}>
+                          Defeated{" "}
+                          <Text style={{ color: "#FFF" }}>{item.winner1}</Text>{" "}
+                          • Week {item.weekWon}
+                        </Text>
+
+                        <View
+                          style={[
+                            styles.miniStatBadge,
+                            {
+                              marginTop: 8,
+                              alignSelf: "flex-start",
+                              backgroundColor: titleColor + "20",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[styles.miniStatText, { color: titleColor }]}
+                          >
+                            {
+                              getDefenseMatches(
+                                item.luchadorId1,
+                                item.weekWon,
+                                item.weekLost
+                              ).length
+                            }{" "}
+                            Successful Defenses
+                          </Text>
+                        </View>
+                      </BlurView>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+
+      {/* --- SELECTION MODAL (DARK) --- */}
       <Modal
         visible={modalVisible}
         animationType="slide"
         presentationStyle="pageSheet"
       >
-        <View style={styles.modalContent}>
+        <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>
               {currentTitle?.category === "Tag"
-                ? "Selecciona Nueva Pareja"
-                : "Selecciona Nuevo Campeón"}
+                ? "Select New Tag Team"
+                : "Select New Champion"}
             </Text>
             <TouchableOpacity onPress={() => setModalVisible(false)}>
-              <Text style={styles.modalClose}>Cancelar</Text>
+              <Text style={styles.modalClose}>Cancel</Text>
             </TouchableOpacity>
           </View>
 
@@ -472,14 +549,14 @@ export default function TitleDetailHistoryScreen() {
                 disabled={tagSelection.length < 2}
                 onPress={() => handleAssign(tagSelection[0], tagSelection[1])}
               >
-                <Text style={styles.confirmText}>CORONAR PAREJA</Text>
+                <Text style={styles.confirmText}>CROWN CHAMPIONS</Text>
               </TouchableOpacity>
             </View>
           )}
         </View>
       </Modal>
 
-      {/* --- NUEVO: MODAL DE LISTA DE DEFENSAS --- */}
+      {/* --- DEFENSES MODAL (DARK GLASS) --- */}
       <Modal
         visible={defensesModalVisible}
         animationType="fade"
@@ -487,25 +564,33 @@ export default function TitleDetailHistoryScreen() {
         onRequestClose={() => setDefensesModalVisible(false)}
       >
         <View style={styles.defensesModalOverlay}>
-          <View style={styles.defensesModalContent}>
+          <BlurView
+            intensity={95}
+            tint="dark"
+            style={styles.defensesModalContent}
+          >
             <View style={styles.defensesHeader}>
               <View>
-                <Text style={styles.defensesTitle}>Defensas Exitosas</Text>
+                <Text style={styles.defensesTitle}>Successful Defenses</Text>
                 <Text style={styles.defensesSubTitle}>{selectedChampName}</Text>
               </View>
               <TouchableOpacity
                 onPress={() => setDefensesModalVisible(false)}
                 style={styles.closeIconBtn}
               >
-                <Ionicons name="close" size={24} color="#64748B" />
+                <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
             </View>
 
             {selectedDefenses.length === 0 ? (
               <View style={styles.noDefensesContainer}>
-                <Ionicons name="shield-outline" size={48} color="#E2E8F0" />
+                <Ionicons
+                  name="shield-outline"
+                  size={48}
+                  color="rgba(255,255,255,0.2)"
+                />
                 <Text style={styles.noDefensesText}>
-                  Este reinado no tuvo defensas registradas.
+                  No successful defenses recorded.
                 </Text>
               </View>
             ) : (
@@ -516,242 +601,223 @@ export default function TitleDetailHistoryScreen() {
                 renderItem={({ item }) => (
                   <View style={styles.defenseItem}>
                     <View style={styles.defenseLeft}>
-                      <Text style={styles.defenseWeek}>Sem {item.week}</Text>
+                      <Text style={styles.defenseWeek}>Wk {item.week}</Text>
                       <View style={styles.starsContainer}>
-                        <Ionicons name="star" size={12} color="#F59E0B" />
+                        <Ionicons name="star" size={10} color="#F59E0B" />
                         <Text style={styles.starsText}>{item.rating}</Text>
                       </View>
                     </View>
                     <View style={styles.defenseRight}>
-                      <Text style={styles.defenseLabel}>Defendió contra:</Text>
+                      <Text style={styles.defenseLabel}>DEFENDED AGAINST</Text>
                       <Text style={styles.defenseOpponent}>
                         {item.loserName}
                       </Text>
-                      <Text style={styles.matchTypeLabel}>
-                        {item.matchType}
-                      </Text>
+                      <View style={styles.matchTypeBadge}>
+                        <Text style={styles.matchTypeText}>
+                          {item.matchType}
+                        </Text>
+                      </View>
                     </View>
                   </View>
                 )}
               />
             )}
-          </View>
+          </BlurView>
         </View>
       </Modal>
     </View>
   );
 }
 
-// ... ESTILOS ...
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: "#F5F7FA" },
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: "#000" },
+  absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
-  // HERO CARD
-  heroCard: {
-    paddingBottom: 30,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    paddingTop: Platform.OS === "android" ? 10 : 0,
-  },
-  navRow: {
+  header: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    padding: 20,
+    paddingTop: 10,
   },
-  backBtn: {
-    padding: 8,
-    backgroundColor: "rgba(255,255,255,0.2)",
+  iconBtn: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  heroTitle: {
-    color: "rgba(255,255,255,0.8)",
-    fontWeight: "bold",
+  headerTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFF",
+    letterSpacing: 1,
+    marginTop: 10,
+  },
+
+  // HERO
+  heroContainer: { alignItems: "center", marginBottom: 30, marginTop: 10 },
+  iconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 2,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+  titleName: {
+    fontSize: 28,
+    fontWeight: "900",
+    color: "#FFF",
+    textAlign: "center",
+    maxWidth: "80%",
+  },
+  titleCategory: {
     fontSize: 12,
+    fontWeight: "bold",
+    letterSpacing: 2,
+    marginTop: 5,
+  },
+
+  sectionContainer: { paddingHorizontal: 20, marginBottom: 25 },
+  sectionLabel: {
+    color: "#94A3B8",
+    fontSize: 11,
+    fontWeight: "800",
+    marginBottom: 10,
     letterSpacing: 1,
   },
 
-  heroContent: { alignItems: "center", marginTop: 10 },
-  titleName: {
-    fontSize: 26,
-    fontWeight: "900",
-    color: "white",
-    marginTop: 10,
-    textAlign: "center",
-    paddingHorizontal: 20,
-  },
-  titleCat: {
-    color: "rgba(255,255,255,0.7)",
-    fontWeight: "600",
-    marginTop: 5,
-    textTransform: "uppercase",
-    letterSpacing: 2,
-    fontSize: 12,
-  },
-
-  // CHAMPION SECTION
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    marginTop: 25,
-    marginBottom: 10,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#94A3B8",
-    letterSpacing: 0.5,
-  },
-  daysBadge: {
-    backgroundColor: "#10B981",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  daysText: { color: "white", fontWeight: "bold", fontSize: 10 },
-
+  // CHAMPION CARD
   championCard: {
-    marginHorizontal: 20,
-    backgroundColor: "white",
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 4,
+    borderWidth: 1,
+    overflow: "hidden",
   },
   champRow: { flexDirection: "row", alignItems: "center" },
-  avatarContainer: { width: 70, height: 70, marginRight: 15 },
+  avatarContainer: { width: 75, height: 75, marginRight: 15 },
   champAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    borderWidth: 3,
-    borderColor: "white",
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    width: 65,
+    height: 65,
+    borderRadius: 32.5,
+    borderWidth: 2,
+    borderColor: "#FFF",
   },
   champPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#F1F5F9",
+    width: 65,
+    height: 65,
+    borderRadius: 32.5,
+    backgroundColor: "#333",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 3,
-    borderColor: "white",
+    borderWidth: 2,
   },
-  initial: { fontSize: 24, fontWeight: "bold", color: "#94A3B8" },
+  initial: { fontSize: 24, fontWeight: "bold", color: "#FFF" },
   secondAvatar: { position: "absolute", bottom: 0, right: 0, zIndex: 2 },
 
   champInfo: { flex: 1 },
   champLabel: {
     fontSize: 10,
-    fontWeight: "bold",
-    color: "#F59E0B",
+    fontWeight: "700",
     marginBottom: 2,
+    letterSpacing: 0.5,
   },
   champName: {
+    color: "#FFF",
     fontSize: 18,
-    fontWeight: "800",
-    color: "#1E293B",
-    lineHeight: 22,
+    fontWeight: "900",
+    marginBottom: 6,
   },
-  sinceText: { fontSize: 12, color: "#64748B", marginTop: 4 },
+
+  statsBadgeRow: { flexDirection: "row", gap: 6 },
+  statBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    gap: 4,
+  },
+  statText: { color: "#E2E8F0", fontSize: 10, fontWeight: "600" },
 
   actionBtn: {
     marginTop: 20,
-    backgroundColor: "#1E293B",
-    paddingVertical: 14,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    paddingVertical: 12,
     borderRadius: 12,
     alignItems: "center",
   },
   actionBtnText: {
-    color: "white",
+    color: "#FFF",
     fontWeight: "bold",
-    fontSize: 13,
+    fontSize: 12,
     letterSpacing: 0.5,
   },
 
-  // VACANT STATE
+  // VACANT
   vacantBox: { alignItems: "center", paddingVertical: 10 },
   vacantTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
+    fontSize: 18,
+    fontWeight: "900",
     color: "#EF4444",
-    marginTop: 8,
+    marginTop: 10,
   },
-  vacantSub: {
-    fontSize: 12,
-    color: "#94A3B8",
-    textAlign: "center",
-    marginTop: 4,
-  },
+  vacantSub: { fontSize: 12, color: "#94A3B8", marginTop: 4 },
 
-  // TIMELINE
-  timelineContainer: { paddingHorizontal: 20, marginTop: 10 },
-  historyItem: { flexDirection: "row" },
+  // HISTORY
+  emptyLog: {
+    padding: 20,
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+  },
+  emptyText: { color: "#64748B", fontStyle: "italic" },
+
+  timelineContainer: { marginTop: 10 },
+  historyRow: { flexDirection: "row" },
   timelineLeft: { width: 20, alignItems: "center" },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#CBD5E1",
-    marginTop: 6,
-  },
-  line: { width: 2, flex: 1, backgroundColor: "#E2E8F0", marginVertical: 4 },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  line: { width: 2, flex: 1, backgroundColor: "#334155", marginVertical: 4 },
 
+  historyCardContainer: { flex: 1, marginBottom: 15, marginLeft: 10 },
   historyCard: {
-    flex: 1,
-    backgroundColor: "white",
     padding: 15,
     borderRadius: 12,
-    marginBottom: 15,
-    marginLeft: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 3,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.05)",
+    overflow: "hidden",
   },
   historyHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 6,
+    marginBottom: 4,
   },
-  historyNames: { fontSize: 14, fontWeight: "bold", color: "#334155" },
-  historyDays: { fontSize: 12, fontWeight: "600", color: "#10B981" },
-  historyDefenses: { fontSize: 12, fontWeight: "600", color: "#64748B" },
-  historySub: { fontSize: 12, color: "#94A3B8" },
+  historyName: { fontSize: 14, fontWeight: "bold", color: "#E2E8F0" },
+  historySub: { fontSize: 11, color: "#94A3B8" },
 
-  emptyState: { alignItems: "center", marginTop: 20 },
-  emptyText: { color: "#94A3B8", fontStyle: "italic" },
+  miniStatBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  miniStatText: { fontSize: 10, fontWeight: "bold" },
 
-  // MODAL
-  modalContent: {
+  // SELECTION MODAL (Light for contrast or custom dark)
+  modalContainer: {
     flex: 1,
-    backgroundColor: "white",
-    marginTop: 60,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: "#FFF",
+    marginTop: 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
     padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
   },
   modalTitle: { fontSize: 18, fontWeight: "800", color: "#1E293B" },
   modalClose: { color: "#3B82F6", fontWeight: "600" },
-
   rosterItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -771,7 +837,6 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   itemName: { fontSize: 14, fontWeight: "600", color: "#1E293B", flex: 1 },
-
   footerBtnContainer: {
     padding: 20,
     borderTopWidth: 1,
@@ -785,18 +850,20 @@ const styles = StyleSheet.create({
   },
   confirmText: { color: "white", fontWeight: "bold" },
 
-  // --- ESTILOS DEL NUEVO MODAL DE DEFENSAS ---
+  // DEFENSES MODAL (Dark)
   defensesModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.8)",
     justifyContent: "center",
     padding: 20,
   },
   defensesModalContent: {
-    backgroundColor: "white",
     borderRadius: 20,
     maxHeight: "60%",
     paddingBottom: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    overflow: "hidden",
   },
   defensesHeader: {
     flexDirection: "row",
@@ -804,10 +871,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+    borderBottomColor: "rgba(255,255,255,0.1)",
   },
-  defensesTitle: { fontSize: 18, fontWeight: "bold", color: "#1E293B" },
-  defensesSubTitle: { fontSize: 14, color: "#64748B" },
+  defensesTitle: { fontSize: 18, fontWeight: "bold", color: "#FFF" },
+  defensesSubTitle: { fontSize: 12, color: "#94A3B8" },
   closeIconBtn: { padding: 5 },
 
   noDefensesContainer: {
@@ -817,60 +884,58 @@ const styles = StyleSheet.create({
   },
   noDefensesText: {
     marginTop: 10,
-    color: "#94A3B8",
+    color: "#64748B",
     fontSize: 14,
     textAlign: "center",
   },
 
   defenseItem: {
     flexDirection: "row",
-    paddingVertical: 12,
+    paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: "#F8FAFC",
+    borderBottomColor: "rgba(255,255,255,0.05)",
   },
   defenseLeft: {
-    width: 60,
+    width: 50,
     alignItems: "center",
     justifyContent: "center",
     borderRightWidth: 1,
-    borderRightColor: "#F1F5F9",
-    paddingRight: 10,
-    marginRight: 10,
+    borderRightColor: "rgba(255,255,255,0.1)",
+    marginRight: 15,
   },
   defenseWeek: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "bold",
-    color: "#64748B",
+    color: "#94A3B8",
     marginBottom: 4,
   },
   starsContainer: { flexDirection: "row", alignItems: "center" },
   starsText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "bold",
     color: "#F59E0B",
     marginLeft: 2,
   },
-
   defenseRight: { flex: 1 },
   defenseLabel: {
-    fontSize: 10,
-    color: "#94A3B8",
+    fontSize: 9,
+    color: "#64748B",
     textTransform: "uppercase",
     fontWeight: "bold",
-  },
-  defenseOpponent: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#1E293B",
     marginBottom: 2,
   },
-  matchTypeLabel: {
-    fontSize: 12,
-    color: "#64748B",
-    backgroundColor: "#F1F5F9",
+  defenseOpponent: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFF",
+    marginBottom: 4,
+  },
+  matchTypeBadge: {
+    backgroundColor: "rgba(255,255,255,0.1)",
     alignSelf: "flex-start",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
   },
+  matchTypeText: { fontSize: 10, color: "#CBD5E1" },
 });

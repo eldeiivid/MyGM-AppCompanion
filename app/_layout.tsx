@@ -1,6 +1,7 @@
 import { Stack, useRouter, useSegments } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Platform, StatusBar } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { GameProvider, useGame } from "../src/context/GameContext";
 import { initDatabase } from "../src/database/db";
 
@@ -9,38 +10,44 @@ function RootLayoutNav() {
   const segments = useSegments();
   const router = useRouter();
 
-  useEffect(() => {
-    const currentSegments = segments as any;
-    const isAtRoot =
-      !currentSegments ||
-      currentSegments.length === 0 ||
-      currentSegments[0] === "" ||
-      currentSegments[0] === "(index)";
-    const inTabsGroup = currentSegments[0] === "(tabs)";
+  // 1. Estado para saber si la app ya cargó
+  const [isMounted, setIsMounted] = useState(false);
 
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    // 2. No hacer nada si no está montado
+    if (!isMounted) return;
+
+    const inTabsGroup = segments[0] === "(tabs)";
+
+    // CASO A: Usuario hace Logout (saveId es null) pero sigue en Tabs
     if (saveId === null && inTabsGroup) {
       router.replace("/");
-    } else if (saveId !== null && isAtRoot) {
+    }
+    // CASO B: Usuario hace Login (saveId tiene valor) y está en el Login (root)
+    else if (saveId !== null && segments[0] === undefined) {
+      // Nota: segments[0] undefined significa que estás en la ruta "/" (index.tsx)
       router.replace("/(tabs)");
     }
-  }, [saveId, segments]);
+  }, [saveId, segments, isMounted]);
 
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        // CLAVE: Evita el parpadeo blanco entre cambios de pantalla
         contentStyle: { backgroundColor: "#F5F7FA" },
-        // Animación fluida tipo iOS para todas las pantallas
-        animation: Platform.OS === "ios" ? "default" : "slide_from_right",
-        // Optimización de rendimiento
+        // Usamos 'fade' o 'default' según prefieras, 'fade' se ve bien en login
+        animation: Platform.OS === "ios" ? "default" : "fade",
         freezeOnBlur: true,
+        gestureEnabled: false, // Evita volver atrás con gestos en el login
       }}
     >
-      <Stack.Screen name="index" options={{ animation: "fade" }} />
-      <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
+      <Stack.Screen name="index" />
+      <Stack.Screen name="(tabs)" />
 
-      {/* Modales con animación dedicada */}
       <Stack.Screen
         name="luchador/new"
         options={{ presentation: "modal", animation: "slide_from_bottom" }}
@@ -59,9 +66,11 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <GameProvider>
-      <StatusBar barStyle="dark-content" />
-      <RootLayoutNav />
-    </GameProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <GameProvider>
+        <StatusBar barStyle="dark-content" />
+        <RootLayoutNav />
+      </GameProvider>
+    </GestureHandlerRootView>
   );
 }

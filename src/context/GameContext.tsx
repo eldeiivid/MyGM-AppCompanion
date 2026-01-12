@@ -6,6 +6,8 @@ interface GameContextType {
   brandTheme: string;
   setGameSession: (id: number, theme: string) => void;
   clearSession: () => void;
+  // Agregamos setSaveId para que index.tsx pueda usarlo si es necesario
+  setSaveId: (id: number | null) => void;
 }
 
 // Creamos el contexto con valores por defecto seguros
@@ -14,6 +16,7 @@ const GameContext = createContext<GameContextType>({
   brandTheme: "#1E293B", // Color default (Slate-800)
   setGameSession: () => {},
   clearSession: () => {},
+  setSaveId: () => {},
 });
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -34,7 +37,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({
 
   return (
     <GameContext.Provider
-      value={{ saveId, brandTheme, setGameSession, clearSession }}
+      // Ahora incluimos setSaveId en el value
+      value={{ saveId, brandTheme, setGameSession, clearSession, setSaveId }}
     >
       {children}
     </GameContext.Provider>

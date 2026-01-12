@@ -1,4 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
@@ -12,7 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ManagementHeader } from "../../src/components/ManagementHeader";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useGame } from "../../src/context/GameContext";
 import { addLuchador } from "../../src/database/operations";
 
@@ -77,321 +79,354 @@ export default function NewLuchadorScreen() {
     }
   };
 
+  // Helper para renderizar opciones (Pills Glass)
+  const OptionPill = ({ label, selected, onPress }: any) => (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[
+        styles.glassPill,
+        selected && { backgroundColor: brandTheme, borderColor: brandTheme },
+      ]}
+    >
+      <Text
+        style={[
+          styles.pillText,
+          selected && { color: "#FFF", fontWeight: "bold" },
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.mainContainer}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="light-content" />
 
-      <ManagementHeader />
+      {/* Background */}
+      <View style={[styles.absoluteFill, { backgroundColor: "#000" }]} />
+      <LinearGradient
+        colors={[brandTheme || "#EF4444", "transparent"]}
+        style={[styles.absoluteFill, { height: "40%", opacity: 0.3 }]}
+      />
 
-      <View style={styles.navHeader}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-        >
-          <Ionicons name="arrow-back" size={24} color="#1E293B" />
-        </TouchableOpacity>
-        <Text style={styles.navTitle}>Nuevo Fichaje</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={{ paddingBottom: 50, paddingHorizontal: 20 }}
-      >
-        <View style={styles.section}>
-          <Text style={styles.label}>Nombre del Luchador</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej: John Cena"
-            value={name}
-            onChangeText={setName}
-          />
-
-          <View style={styles.row}>
-            <View style={{ flex: 1, marginRight: 10 }}>
-              <Text style={styles.label}>Género</Text>
-              <View style={styles.pillsContainer}>
-                {GENDERS.map((g) => (
-                  <TouchableOpacity
-                    key={g}
-                    style={[
-                      styles.pill,
-                      gender === g && {
-                        backgroundColor: brandTheme,
-                        borderColor: brandTheme,
-                      },
-                    ]}
-                    onPress={() => setGender(g)}
-                  >
-                    <Text
-                      style={[
-                        styles.pillText,
-                        gender === g && styles.pillTextActive,
-                      ]}
-                    >
-                      {g}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={{ flex: 1 }}>
-              <Text style={styles.label}>Reacción</Text>
-              <View style={styles.pillsContainer}>
-                {CROWDS.map((c) => (
-                  <TouchableOpacity
-                    key={c}
-                    style={[
-                      styles.pill,
-                      crowd === c && {
-                        backgroundColor: brandTheme,
-                        borderColor: brandTheme,
-                      },
-                    ]}
-                    onPress={() => setCrowd(c)}
-                  >
-                    <Text
-                      style={[
-                        styles.pillText,
-                        crowd === c && styles.pillTextActive,
-                      ]}
-                    >
-                      {c}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-
-          <Text style={styles.label}>Clase Principal</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ marginBottom: 15 }}
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backBtn}
           >
-            {CLASSES.map((cls) => (
-              <TouchableOpacity
-                key={cls}
-                style={[
-                  styles.pill,
-                  mainClass === cls && {
-                    backgroundColor: brandTheme,
-                    borderColor: brandTheme,
-                  },
-                ]}
-                onPress={() => setMainClass(cls)}
-              >
-                <Text
+            <Ionicons name="close" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>NEW SIGNING</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <ScrollView
+          contentContainerStyle={{ padding: 20, paddingBottom: 50 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Nombre y Datos Básicos */}
+          <BlurView intensity={20} tint="dark" style={styles.glassCard}>
+            <Text style={styles.sectionTitle}>BASIC INFO</Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Ring Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ex: John Cena"
+                placeholderTextColor="#64748B"
+                value={name}
+                onChangeText={setName}
+                autoFocus
+              />
+            </View>
+
+            <View style={styles.row}>
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <Text style={styles.label}>Gender</Text>
+                <View style={styles.pillContainer}>
+                  {GENDERS.map((g) => (
+                    <OptionPill
+                      key={g}
+                      label={g}
+                      selected={gender === g}
+                      onPress={() => setGender(g)}
+                    />
+                  ))}
+                </View>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Alignment</Text>
+                <View style={styles.pillContainer}>
+                  {CROWDS.map((c) => (
+                    <OptionPill
+                      key={c}
+                      label={c}
+                      selected={crowd === c}
+                      onPress={() => setCrowd(c)}
+                    />
+                  ))}
+                </View>
+              </View>
+            </View>
+
+            <Text style={[styles.label, { marginTop: 15 }]}>
+              Fighting Style
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginBottom: 5 }}
+            >
+              {CLASSES.map((cls) => (
+                <TouchableOpacity
+                  key={cls}
+                  onPress={() => setMainClass(cls)}
                   style={[
-                    styles.pillText,
-                    mainClass === cls && styles.pillTextActive,
+                    styles.classPill,
+                    mainClass === cls && {
+                      backgroundColor: "rgba(255,255,255,0.2)",
+                      borderColor: "#FFF",
+                    },
                   ]}
                 >
-                  {cls}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+                  <Text
+                    style={[
+                      styles.classText,
+                      mainClass === cls && { color: "#FFF" },
+                    ]}
+                  >
+                    {cls}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </BlurView>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionHeader}>Estadísticas</Text>
-          <View style={styles.row}>
-            <View style={styles.statInput}>
-              <Text style={styles.label}>Ring Lvl (1-20)</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={ringLevel}
-                onChangeText={setRingLevel}
-                maxLength={2}
+          {/* Estadísticas */}
+          <BlurView intensity={20} tint="dark" style={styles.glassCard}>
+            <Text style={styles.sectionTitle}>ATTRIBUTES</Text>
+            <View style={styles.row}>
+              <View style={styles.statBox}>
+                <Text style={styles.label}>In-Ring (1-25)</Text>
+                <TextInput
+                  style={styles.statInput}
+                  keyboardType="numeric"
+                  value={ringLevel}
+                  onChangeText={setRingLevel}
+                  maxLength={2}
+                />
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.label}>Mic (1-5)</Text>
+                <TextInput
+                  style={styles.statInput}
+                  keyboardType="numeric"
+                  value={mic}
+                  onChangeText={setMic}
+                  maxLength={1}
+                />
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.label}>Pop (0-100)</Text>
+                <TextInput
+                  style={styles.statInput}
+                  keyboardType="numeric"
+                  value={pop}
+                  onChangeText={setPop}
+                  maxLength={3}
+                />
+              </View>
+            </View>
+          </BlurView>
+
+          {/* Contrato */}
+          <BlurView intensity={20} tint="dark" style={styles.glassCard}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 15,
+              }}
+            >
+              <Text style={styles.sectionTitle}>CONTRACT DETAILS</Text>
+              <Switch
+                value={isDraft}
+                onValueChange={setIsDraft}
+                trackColor={{ false: "#333", true: brandTheme }}
+                thumbColor={"#FFF"}
               />
             </View>
-            <View style={styles.statInput}>
-              <Text style={styles.label}>Mic Lvl (1-20)</Text>
+
+            <Text style={styles.helperText}>
+              {isDraft
+                ? "PERMANENT ROSTER (No Expiration)"
+                : "FREE AGENT (Temporary Contract)"}
+            </Text>
+
+            {!isDraft && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Duration (Weeks)</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={weeksLeft}
+                  onChangeText={setWeeksLeft}
+                />
+              </View>
+            )}
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Salary Cost ($)</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { color: "#4ADE80" }]}
                 keyboardType="numeric"
-                value={mic}
-                onChangeText={setMic}
-                maxLength={2}
+                value={hiringCost}
+                onChangeText={setHiringCost}
               />
             </View>
-            <View style={styles.statInput}>
-              <Text style={styles.label}>Pop (0-100)</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={pop}
-                onChangeText={setPop}
-                maxLength={3}
-              />
-            </View>
-          </View>
-        </View>
+          </BlurView>
 
-        <View
-          style={[
-            styles.section,
-            {
-              borderLeftWidth: 5,
-              borderLeftColor: isDraft ? brandTheme : "#9CA3AF",
-            },
-          ]}
-        >
-          <Text style={styles.sectionHeader}>Tipo de Contrato</Text>
-
-          <View style={styles.switchRow}>
-            <View>
-              <Text style={styles.switchTitle}>
-                {isDraft
-                  ? "♾️ DRAFT (Permanente)"
-                  : "📅 AGENTE LIBRE (Temporal)"}
-              </Text>
-              <Text style={styles.switchSub}>
-                {isDraft
-                  ? "Pertenece a la plantilla fija. No expira."
-                  : "Contrato temporal que debe renovarse."}
-              </Text>
-            </View>
-            <Switch
-              value={isDraft}
-              onValueChange={setIsDraft}
-              trackColor={{ false: "#E0E0E0", true: brandTheme }}
-              thumbColor={"#fff"}
+          <TouchableOpacity
+            style={[styles.saveBtn, { backgroundColor: brandTheme }]}
+            onPress={handleSave}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.saveBtnText}>SIGN TALENT</Text>
+            <Ionicons
+              name="checkmark-circle"
+              size={20}
+              color="#FFF"
+              style={{ marginLeft: 8 }}
             />
-          </View>
-
-          {!isDraft && (
-            <View style={{ marginTop: 15 }}>
-              <Text style={styles.label}>Duración (Semanas)</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={weeksLeft}
-                onChangeText={setWeeksLeft}
-              />
-            </View>
-          )}
-
-          <View style={{ marginTop: 15 }}>
-            <Text style={styles.label}>Costo de Fichaje ($)</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={hiringCost}
-              onChangeText={setHiringCost}
-            />
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: brandTheme }]}
-          onPress={handleSave}
-        >
-          <Text style={styles.saveBtnText}>CONTRATAR LUCHADOR</Text>
-        </TouchableOpacity>
-      </ScrollView>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: "#F5F7FA" },
-  container: { flex: 1 },
+  mainContainer: { flex: 1, backgroundColor: "#000" },
+  absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
-  navHeader: {
+  header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingVertical: 15,
-    backgroundColor: "#F5F7FA",
   },
-  backButton: {
-    backgroundColor: "white",
-    padding: 8,
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  navTitle: { fontSize: 18, fontWeight: "800", color: "#1E293B" },
-
   headerTitle: {
-    fontSize: 28,
-    fontWeight: "900",
-    marginBottom: 20,
-    color: "#1C1C1E",
-    marginTop: 10,
-  },
-
-  section: {
-    backgroundColor: "white",
-    padding: 20,
-    borderRadius: 16,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  sectionHeader: {
     fontSize: 16,
-    fontWeight: "bold",
-    marginBottom: 15,
-    color: "#333",
+    fontWeight: "900",
+    color: "#FFF",
+    letterSpacing: 1,
   },
 
+  glassCard: {
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    marginBottom: 20,
+    overflow: "hidden",
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#94A3B8",
+    marginBottom: 15,
+    letterSpacing: 1,
+  },
+
+  inputGroup: { marginBottom: 15 },
   label: {
     fontSize: 12,
     fontWeight: "bold",
-    color: "#8E8E93",
-    marginBottom: 5,
+    color: "#CBD5E1",
+    marginBottom: 8,
   },
   input: {
-    backgroundColor: "#F2F2F7",
-    padding: 12,
-    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 16,
+    color: "#FFF",
     fontSize: 16,
-    marginBottom: 15,
-    fontWeight: "500",
-  },
-  row: { flexDirection: "row", justifyContent: "space-between" },
-
-  pillsContainer: { flexDirection: "row", gap: 8, marginBottom: 15 },
-  pill: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    backgroundColor: "#F2F2F7",
+    fontWeight: "600",
     borderWidth: 1,
-    borderColor: "transparent",
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  pillText: { fontSize: 12, color: "#666", fontWeight: "600" },
-  pillTextActive: { color: "white" },
 
-  statInput: { flex: 1, marginHorizontal: 4 },
+  row: { flexDirection: "row", justifyContent: "space-between" },
+  pillContainer: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
 
-  switchRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  glassPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    flex: 1,
     alignItems: "center",
   },
-  switchTitle: { fontSize: 16, fontWeight: "bold", color: "#333" },
-  switchSub: { fontSize: 11, color: "#888", maxWidth: 220, marginTop: 2 },
+  pillText: { fontSize: 12, color: "#94A3B8", fontWeight: "600" },
+
+  classPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    marginRight: 8,
+    backgroundColor: "transparent",
+  },
+  classText: { color: "#94A3B8", fontWeight: "600", fontSize: 12 },
+
+  statBox: { flex: 1, marginHorizontal: 4 },
+  statInput: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 16,
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+
+  helperText: {
+    color: "#94A3B8",
+    fontSize: 12,
+    marginBottom: 15,
+    fontStyle: "italic",
+  },
 
   saveBtn: {
-    padding: 18,
-    borderRadius: 12,
+    flexDirection: "row",
+    justifyContent: "center",
     alignItems: "center",
+    padding: 18,
+    borderRadius: 16,
     marginTop: 10,
-    marginBottom: 40,
   },
-  saveBtnText: { color: "white", fontWeight: "bold", fontSize: 16 },
+  saveBtnText: {
+    color: "#FFF",
+    fontWeight: "900",
+    fontSize: 16,
+    letterSpacing: 1,
+  },
 });

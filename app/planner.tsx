@@ -1,4 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -16,8 +17,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { ManagementHeader } from "../src/components/ManagementHeader";
-import { useGame } from "../src/context/GameContext"; // <--- 1. IMPORTAR CONTEXTO
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useGame } from "../src/context/GameContext";
 import {
   addPlannedMatch,
   getAllLuchadores,
@@ -30,8 +31,8 @@ import { Luchador } from "../src/types";
 const INTERFERENCE_COST = 2000;
 const { width } = Dimensions.get("window");
 
-// AJUSTE DE MEDIDAS PARA EVITAR DESBORDAMIENTO
-const CARD_WIDTH_LARGE = (width - 110) / 2;
+// AJUSTE DE MEDIDAS
+const CARD_WIDTH_LARGE = (width - 80) / 2;
 const CARD_WIDTH_SMALL = (width - 60) / 3;
 
 const MATCH_FORMATS = [
@@ -68,43 +69,37 @@ const STIPULATIONS = [
   { name: "Hell in a Cell", cost: 48000, icon: "grid-large" },
   { name: "Iron Man", cost: 24000, icon: "timer-sand" },
   { name: "Last Man Standing", cost: 18000, icon: "human-handsup" },
-  { name: "Sumisión", cost: 30000, icon: "lock" },
-  { name: "Ambulancia", cost: 36000, icon: "ambulance" },
-  { name: "Ataúd", cost: 90000, icon: "coffin" },
+  { name: "Submission", cost: 30000, icon: "lock" },
+  { name: "Ambulance", cost: 36000, icon: "ambulance" },
+  { name: "Casket", cost: 90000, icon: "coffin" },
 ];
 
 const PROMO_TYPES = [
   {
     id: "autopromocion",
-    name: "Autopromoción",
+    name: "Self Promo",
     cost: 2500,
     icon: "microphone",
     isVs: false,
   },
-  {
-    id: "provocacion",
-    name: "Provocación",
-    cost: 3000,
-    icon: "fire",
-    isVs: true,
-  },
+  { id: "provocacion", name: "Call Out", cost: 3000, icon: "fire", isVs: true },
   {
     id: "entrenamiento",
-    name: "Entrenamiento",
+    name: "Training",
     cost: 5000,
     icon: "dumbbell",
     isVs: false,
   },
   {
     id: "publicidad",
-    name: "Publicidad",
+    name: "Ad Break",
     cost: 0,
     icon: "bullhorn",
     isVs: false,
   },
   {
     id: "benefica",
-    name: "Obra Benéfica",
+    name: "Charity",
     cost: 15000,
     icon: "hand-heart",
     isVs: false,
@@ -114,7 +109,7 @@ const PROMO_TYPES = [
 export default function PlannerScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { saveId } = useGame(); // <--- 2. USAR CONTEXTO
+  const { saveId, brandTheme } = useGame();
 
   // --- 1. PRE-PROCESAMIENTO ---
   const initialData = params.matchData
@@ -181,8 +176,6 @@ export default function PlannerScreen() {
 
   useEffect(() => {
     if (!saveId) return;
-
-    // 3. PASAR SAVE_ID
     const rawRoster: any[] = getAllLuchadores(saveId);
     const sortedRoster = rawRoster.sort((a, b) => {
       const aExpired = a.isDraft === 0 && a.weeksLeft <= 0;
@@ -199,10 +192,9 @@ export default function PlannerScreen() {
       ? selectedStipulation.cost + (hasInterference ? INTERFERENCE_COST : 0)
       : selectedPromoType.cost;
 
-  // --- 3. LÓGICA DE FILTRADO DE TÍTULOS ---
+  // --- LOGICA ---
   const getAvailableTitles = () => {
     const isTagMatch = selectedFormat.id === "2v2";
-
     return titles.filter((t) => {
       if (isTagMatch && t.category !== "Tag") return false;
       if (!isTagMatch && t.category === "Tag") return false;
@@ -243,34 +235,24 @@ export default function PlannerScreen() {
   const handleSelectLuchador = (luchador: Luchador) => {
     // @ts-ignore
     if (luchador.isDraft === 0 && luchador.weeksLeft <= 0) {
-      Alert.alert(
-        "Contrato Vencido",
-        `El contrato de ${luchador.name} ha terminado.`
-      );
+      Alert.alert("Contract Expired", `${luchador.name} cannot compete.`);
       return;
     }
     for (let i = 0; i < 4; i++) {
       if (participants[i]?.find((p) => p.id === luchador.id)) {
-        Alert.alert("Error", "Ya está seleccionado.");
+        Alert.alert("Error", "Already selected.");
         return;
       }
     }
 
     const currentTeam = participants[activeTeamIndex] || [];
-    let limit = 100;
-
-    if (segmentTab === "MATCH") {
-      limit = selectedFormat.membersPerTeam;
-    } else {
-      limit = 1;
-    }
+    let limit = segmentTab === "MATCH" ? selectedFormat.membersPerTeam : 1;
 
     if (currentTeam.length >= limit) return;
 
     const newTeam = [...currentTeam, luchador];
     setParticipants({ ...participants, [activeTeamIndex]: newTeam });
 
-    // Auto-selección de título
     if (segmentTab === "MATCH") {
       const isTagMatch = selectedFormat.id === "2v2";
       const t = titles.find(
@@ -279,7 +261,6 @@ export default function PlannerScreen() {
           (isTagMatch ? t.category === "Tag" : t.category !== "Tag") &&
           !t.isMITB
       );
-
       if (t && !titleInvolved) {
         setTitleInvolved(t);
         setIsTitleMatch(true);
@@ -291,7 +272,6 @@ export default function PlannerScreen() {
   const removeLuchador = (teamIndex: number, luchadorId: number) => {
     const newTeam = participants[teamIndex].filter((p) => p.id !== luchadorId);
     setParticipants({ ...participants, [teamIndex]: newTeam });
-
     if (
       titleInvolved &&
       (titleInvolved.holderId1 === luchadorId ||
@@ -308,16 +288,12 @@ export default function PlannerScreen() {
     if (segmentTab === "MATCH") {
       for (let i = 0; i < selectedFormat.teams; i++) {
         if ((participants[i] || []).length < selectedFormat.membersPerTeam) {
-          Alert.alert(
-            "Incompleto",
-            `Faltan participantes en el espacio #${i + 1}`
-          );
+          Alert.alert("Incomplete", `Missing participants in slot #${i + 1}`);
           return;
         }
       }
-
       if (isTitleMatch && !titleInvolved) {
-        Alert.alert("Error", "Selecciona un título para la pelea.");
+        Alert.alert("Error", "Select a title for the match.");
         return;
       }
     } else if (selectedPromoType.isVs) {
@@ -325,12 +301,12 @@ export default function PlannerScreen() {
         (participants[0] || []).length === 0 ||
         (participants[1] || []).length === 0
       ) {
-        Alert.alert("Incompleto", "Se necesita Protagonista y Objetivo");
+        Alert.alert("Incomplete", "Need both Speaker and Target.");
         return;
       }
     } else {
       if ((participants[0] || []).length === 0) {
-        Alert.alert("Vacío", "Selecciona al protagonista.");
+        Alert.alert("Empty", "Select a talent.");
         return;
       }
     }
@@ -343,14 +319,9 @@ export default function PlannerScreen() {
       segmentTab === "MATCH" ? selectedStipulation.name : "N/A";
 
     let success;
-
-    // 4. PASAR SAVE_ID A UPDATE/ADD
     if (editId) {
       success = updatePlannedMatch(
-        editId, // Update ya sabe cual ID editar, pero... espera, updatePlannedMatch no necesita saveId porque el ID es unico en la tabla planned_matches.
-        // Un momento... updatePlannedMatch en operations.ts no recibe saveId porque filtra por ID único del match.
-        // REVISANDO operations.ts: updatePlannedMatch(id, matchType...)
-        // CORRECTO. No hace falta saveId para update.
+        editId,
         typeName,
         participants,
         stipulationName,
@@ -360,7 +331,7 @@ export default function PlannerScreen() {
       );
     } else {
       success = addPlannedMatch(
-        saveId, // <--- AQUÍ SÍ HACE FALTA
+        saveId,
         typeName,
         participants,
         stipulationName,
@@ -371,74 +342,71 @@ export default function PlannerScreen() {
     }
 
     if (success) router.back();
-    else Alert.alert("Error", "No se pudo guardar.");
+    else Alert.alert("Error", "Could not save.");
   };
 
   const getLabelForSlot = (teamIndex: number) => {
     if (segmentTab === "PROMO") {
-      if (selectedPromoType.id === "provocacion") {
-        return teamIndex === 0 ? "🎙️ PROVOCADOR" : "🎯 OBJETIVO";
-      }
-      return "PROTAGONISTA";
+      if (selectedPromoType.id === "provocacion")
+        return teamIndex === 0 ? "SPEAKER" : "TARGET";
+      return "TALENT";
     }
     if (selectedFormat.id === "1v1")
-      return teamIndex === 0 ? "Luchador 1" : "Luchador 2";
+      return teamIndex === 0 ? "CORNER 1" : "CORNER 2";
     if (selectedFormat.id === "2v2")
-      return teamIndex === 0 ? "Equipo 1" : "Equipo 2";
-    if (selectedFormat.id === "3way") return `Luchador ${teamIndex + 1}`;
-    if (selectedFormat.id === "4way") return `Luchador ${teamIndex + 1}`;
-
-    return `Esquina #${teamIndex + 1}`;
+      return teamIndex === 0 ? "TEAM 1" : "TEAM 2";
+    return `CORNER #${teamIndex + 1}`;
   };
 
-  // --- COMPONENTE TARJETA DE LUCHADOR ---
+  // --- RENDERERS ---
   const FighterCard = ({ index, fighter, onPress, widthStyle }: any) => (
     <TouchableOpacity
       style={[styles.slotCard, widthStyle && { width: widthStyle }]}
       onPress={onPress}
     >
-      {fighter ? (
-        <>
-          {fighter.imageUri ? (
-            <Image
-              source={{ uri: fighter.imageUri }}
-              style={styles.slotImageLarge}
-            />
-          ) : (
-            <View style={styles.slotPlaceholderLarge}>
-              <Text style={styles.slotInitialsLarge}>
-                {fighter.name.charAt(0)}
+      <BlurView intensity={20} tint="dark" style={styles.slotBlur}>
+        {fighter ? (
+          <>
+            {fighter.imageUri ? (
+              <Image
+                source={{ uri: fighter.imageUri }}
+                style={styles.slotImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.slotPlaceholder}>
+                <Text style={styles.slotInitials}>
+                  {fighter.name.charAt(0)}
+                </Text>
+              </View>
+            )}
+            <View style={styles.nameTag}>
+              <Text style={styles.slotName} numberOfLines={1}>
+                {fighter.name}
               </Text>
             </View>
-          )}
-          <View style={styles.nameTag}>
-            <Text style={styles.slotName} numberOfLines={1}>
-              {fighter.name}
-            </Text>
+            <TouchableOpacity
+              style={styles.removeBtn}
+              onPress={() => removeLuchador(index, fighter.id)}
+            >
+              <Ionicons name="close" size={12} color="white" />
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={styles.emptySlotContent}>
+            <Ionicons name="add" size={24} color="#64748B" />
+            <Text style={styles.addText}>Select</Text>
           </View>
-          <TouchableOpacity
-            style={styles.removeBtn}
-            onPress={() => removeLuchador(index, fighter.id)}
-          >
-            <Ionicons name="close" size={14} color="white" />
-          </TouchableOpacity>
-        </>
-      ) : (
-        <View style={styles.emptySlotContent}>
-          <Ionicons name="add" size={32} color="#CBD5E1" />
-          <Text style={styles.addText}>Añadir</Text>
-        </View>
-      )}
+        )}
+      </BlurView>
     </TouchableOpacity>
   );
 
-  // --- RENDERIZADO DINÁMICO ---
   const renderParticipantsSection = () => {
-    // 1 vs 1 (Cartas Grandes, Flexibles)
     if (selectedFormat.id === "1v1") {
       return (
         <View style={styles.vsContainer}>
-          <View style={styles.fighterWrapper}>
+          <View style={styles.fighterColumn}>
             <Text style={styles.columnTitle}>{getLabelForSlot(0)}</Text>
             <FighterCard
               index={0}
@@ -447,10 +415,10 @@ export default function PlannerScreen() {
               widthStyle={CARD_WIDTH_LARGE}
             />
           </View>
-          <View style={styles.vsBadgeLarge}>
-            <Text style={styles.vsTextLarge}>VS</Text>
+          <View style={styles.vsBadge}>
+            <Text style={styles.vsText}>VS</Text>
           </View>
-          <View style={styles.fighterWrapper}>
+          <View style={styles.fighterColumn}>
             <Text style={styles.columnTitle}>{getLabelForSlot(1)}</Text>
             <FighterCard
               index={1}
@@ -462,56 +430,13 @@ export default function PlannerScreen() {
         </View>
       );
     }
-
-    // Triple Threat
-    if (selectedFormat.id === "3way") {
-      return (
-        <View style={styles.rowContainer}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={{ width: CARD_WIDTH_SMALL }}>
-              <Text style={[styles.columnTitle, { textAlign: "center" }]}>
-                {getLabelForSlot(i)}
-              </Text>
-              <FighterCard
-                index={i}
-                fighter={participants[i]?.[0]}
-                onPress={() => openSelectionModal(i)}
-                widthStyle={"100%"}
-              />
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    // Fatal 4-Way
-    if (selectedFormat.id === "4way") {
-      return (
-        <View style={styles.gridContainer}>
-          {[0, 1, 2, 3].map((i) => (
-            <View key={i} style={styles.gridItem}>
-              <Text style={[styles.columnTitle, { textAlign: "center" }]}>
-                {getLabelForSlot(i)}
-              </Text>
-              <FighterCard
-                index={i}
-                fighter={participants[i]?.[0]}
-                onPress={() => openSelectionModal(i)}
-                widthStyle={"100%"}
-              />
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    // Tag Team (2 Columnas)
+    // ... (Logica similar para 3way/4way/Tag, simplificada para brevedad, sigue el mismo patrón de FighterCard)
     if (selectedFormat.id === "2v2") {
       return (
         <View style={styles.vsContainer}>
-          <View style={styles.teamColumn}>
+          <View style={styles.fighterColumn}>
             <Text style={styles.columnTitle}>{getLabelForSlot(0)}</Text>
-            <View style={{ gap: 10, alignItems: "center" }}>
+            <View style={{ gap: 10 }}>
               <FighterCard
                 index={0}
                 fighter={participants[0]?.[0]}
@@ -526,14 +451,12 @@ export default function PlannerScreen() {
               />
             </View>
           </View>
-
-          <View style={[styles.vsBadgeLarge, { marginTop: 40 }]}>
-            <Text style={styles.vsTextLarge}>VS</Text>
+          <View style={[styles.vsBadge, { marginTop: 60 }]}>
+            <Text style={styles.vsText}>VS</Text>
           </View>
-
-          <View style={styles.teamColumn}>
+          <View style={styles.fighterColumn}>
             <Text style={styles.columnTitle}>{getLabelForSlot(1)}</Text>
-            <View style={{ gap: 10, alignItems: "center" }}>
+            <View style={{ gap: 10 }}>
               <FighterCard
                 index={1}
                 fighter={participants[1]?.[0]}
@@ -551,369 +474,346 @@ export default function PlannerScreen() {
         </View>
       );
     }
+    if (selectedFormat.id === "3way" || selectedFormat.id === "4way") {
+      return (
+        <View style={styles.gridContainer}>
+          {Array.from({ length: selectedFormat.teams }).map((_, i) => (
+            <View
+              key={i}
+              style={{ width: "48%", marginBottom: 15, alignItems: "center" }}
+            >
+              <Text style={styles.columnTitle}>{getLabelForSlot(i)}</Text>
+              <FighterCard
+                index={i}
+                fighter={participants[i]?.[0]}
+                onPress={() => openSelectionModal(i)}
+                widthStyle={"100%"}
+              />
+            </View>
+          ))}
+        </View>
+      );
+    }
   };
 
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="light-content" />
 
-      <ManagementHeader />
+      <View style={[styles.absoluteFill, { backgroundColor: "#000" }]} />
+      <LinearGradient
+        colors={[brandTheme || "#EF4444", "transparent"]}
+        style={[styles.absoluteFill, { height: "40%", opacity: 0.3 }]}
+      />
 
-      <View style={styles.pageHeader}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="close" size={24} color="#1E293B" />
-        </TouchableOpacity>
-        <Text style={styles.pageTitle}>
-          {isEditing ? "Editar Segmento" : "Planear Segmento"}
-        </Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* TABS */}
-        <View style={styles.toggleContainer}>
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* HEADER */}
+        <View style={styles.header}>
           <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              segmentTab === "MATCH" && styles.toggleBtnActive,
-            ]}
-            onPress={() => handleTabChange("MATCH")}
+            onPress={() => router.back()}
+            style={styles.iconBtn}
           >
-            <Text
-              style={[
-                styles.toggleText,
-                segmentTab === "MATCH" && styles.toggleTextActive,
-              ]}
-            >
-              Combate
-            </Text>
+            <Ionicons name="close" size={24} color="#FFF" />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              segmentTab === "PROMO" && { backgroundColor: "#F3E8FF" },
-            ]}
-            onPress={() => handleTabChange("PROMO")}
-          >
-            <View
-              style={[
-                StyleSheet.absoluteFill,
-                segmentTab === "PROMO" && {
-                  backgroundColor: "#9C27B0",
-                  borderRadius: 20,
-                },
-              ]}
-            />
-            <Text
-              style={[
-                styles.toggleText,
-                segmentTab === "PROMO" && styles.toggleTextActive,
-              ]}
-            >
-              Promo
-            </Text>
-          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {isEditing ? "EDIT SEGMENT" : "NEW SEGMENT"}
+          </Text>
+          <View style={{ width: 40 }} />
         </View>
 
-        {/* PROMO UI */}
-        {segmentTab === "PROMO" && (
-          <>
-            <Text style={styles.sectionHeader}>Tipo de Segmento</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.horizontalScroll}
-            >
-              {PROMO_TYPES.map((p) => (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[
-                    styles.optionCard,
-                    selectedPromoType.id === p.id && {
-                      borderColor: "#9C27B0",
-                      backgroundColor: "#F3E8FF",
-                    },
-                  ]}
-                  onPress={() => handlePromoTypeChange(p)}
-                >
-                  <MaterialCommunityIcons
-                    name={p.icon as any}
-                    size={28}
-                    color={
-                      selectedPromoType.id === p.id ? "#9C27B0" : "#64748B"
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      selectedPromoType.id === p.id && {
-                        color: "#9C27B0",
-                        fontWeight: "bold",
-                      },
-                    ]}
-                  >
-                    {p.name}
-                  </Text>
-                  <Text style={styles.optionCost}>
-                    {p.cost === 0 ? "Gratis" : `-$${p.cost}`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <Text style={styles.sectionHeader}>Talentos</Text>
-
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: selectedPromoType.isVs
-                  ? "space-between"
-                  : "center",
-                alignItems: "center",
-              }}
-            >
-              <View>
-                <Text style={[styles.columnTitle, { textAlign: "center" }]}>
-                  {getLabelForSlot(0)}
-                </Text>
-                <FighterCard
-                  index={0}
-                  fighter={participants[0]?.[0]}
-                  onPress={() => openSelectionModal(0)}
-                  widthStyle={CARD_WIDTH_LARGE}
-                />
-              </View>
-
-              {selectedPromoType.isVs && (
-                <>
-                  <View style={styles.vsBadgeLarge}>
-                    <Text style={styles.vsTextLarge}>VS</Text>
-                  </View>
-                  <View>
-                    <Text style={[styles.columnTitle, { textAlign: "center" }]}>
-                      {getLabelForSlot(1)}
-                    </Text>
-                    <FighterCard
-                      index={1}
-                      fighter={participants[1]?.[0]}
-                      onPress={() => openSelectionModal(1)}
-                      widthStyle={CARD_WIDTH_LARGE}
-                    />
-                  </View>
-                </>
-              )}
-            </View>
-          </>
-        )}
-
-        {/* MATCH UI */}
-        {segmentTab === "MATCH" && (
-          <>
-            <Text style={styles.sectionHeader}>Formato de Lucha</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.horizontalScroll}
-            >
-              {MATCH_FORMATS.map((f) => (
-                <TouchableOpacity
-                  key={f.id}
-                  style={[
-                    styles.optionCard,
-                    selectedFormat.id === f.id && {
-                      borderColor: "#3B82F6",
-                      backgroundColor: "#EFF6FF",
-                    },
-                  ]}
-                  onPress={() => handleFormatChange(f)}
-                >
-                  <MaterialCommunityIcons
-                    name={f.icon as any}
-                    size={28}
-                    color={selectedFormat.id === f.id ? "#3B82F6" : "#64748B"}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      selectedFormat.id === f.id && {
-                        color: "#3B82F6",
-                        fontWeight: "bold",
-                      },
-                    ]}
-                  >
-                    {f.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <Text style={styles.sectionHeader}>Participantes</Text>
-            {renderParticipantsSection()}
-
-            <Text style={[styles.sectionHeader, { marginTop: 20 }]}>
-              Reglas y Estipulación
-            </Text>
-            <TouchableOpacity
-              style={styles.stipulationSelector}
-              onPress={() => setStipulationModalVisible(true)}
-            >
-              <View style={styles.stipulationLeft}>
-                <View
-                  style={[
-                    styles.stipulationIconBg,
-                    {
-                      backgroundColor:
-                        selectedStipulation.cost > 0 ? "#FEF2F2" : "#F0F9FF",
-                    },
-                  ]}
-                >
-                  <MaterialCommunityIcons
-                    name={selectedStipulation.icon as any}
-                    size={24}
-                    color={selectedStipulation.cost > 0 ? "#EF4444" : "#0EA5E9"}
-                  />
-                </View>
-                <View>
-                  <Text style={styles.stipulationLabel}>
-                    Estipulación Actual
-                  </Text>
-                  <Text style={styles.stipulationValue}>
-                    {selectedStipulation.name}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.stipulationRight}>
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
+          {/* TABS */}
+          <BlurView intensity={20} tint="dark" style={styles.tabContainer}>
+            {["MATCH", "PROMO"].map((tab) => (
+              <TouchableOpacity
+                key={tab}
+                style={[
+                  styles.tabBtn,
+                  segmentTab === tab && {
+                    backgroundColor: "rgba(255,255,255,0.2)",
+                  },
+                ]}
+                onPress={() => handleTabChange(tab as any)}
+              >
                 <Text
                   style={[
-                    styles.stipulationCost,
-                    {
-                      color:
-                        selectedStipulation.cost > 0 ? "#EF4444" : "#10B981",
-                    },
+                    styles.tabText,
+                    segmentTab === tab && { color: "#FFF" },
                   ]}
+                >
+                  {tab}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </BlurView>
+
+          {/* MATCH CONFIG */}
+          {segmentTab === "MATCH" && (
+            <>
+              <Text style={styles.sectionTitle}>MATCH TYPE</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 20 }}
+              >
+                {MATCH_FORMATS.map((f) => (
+                  <TouchableOpacity
+                    key={f.id}
+                    style={[
+                      styles.optionCard,
+                      selectedFormat.id === f.id && {
+                        borderColor: brandTheme,
+                        backgroundColor: brandTheme + "20",
+                      },
+                    ]}
+                    onPress={() => handleFormatChange(f)}
+                  >
+                    <MaterialCommunityIcons
+                      name={f.icon as any}
+                      size={24}
+                      color={
+                        selectedFormat.id === f.id ? brandTheme : "#64748B"
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.optionText,
+                        selectedFormat.id === f.id && { color: brandTheme },
+                      ]}
+                    >
+                      {f.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text style={styles.sectionTitle}>PARTICIPANTS</Text>
+              {renderParticipantsSection()}
+
+              <Text style={styles.sectionTitle}>STIPULATION</Text>
+              <TouchableOpacity
+                style={styles.stipBtn}
+                onPress={() => setStipulationModalVisible(true)}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.iconBox,
+                      selectedStipulation.cost > 0 && {
+                        backgroundColor: "#EF444420",
+                      },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name={selectedStipulation.icon as any}
+                      size={20}
+                      color={selectedStipulation.cost > 0 ? "#EF4444" : "#FFF"}
+                    />
+                  </View>
+                  <View>
+                    <Text style={styles.stipLabel}>CURRENT RULES</Text>
+                    <Text style={styles.stipValue}>
+                      {selectedStipulation.name}
+                    </Text>
+                  </View>
+                </View>
+                <Text
+                  style={{
+                    color: selectedStipulation.cost > 0 ? "#EF4444" : "#10B981",
+                    fontWeight: "bold",
+                  }}
                 >
                   {selectedStipulation.cost > 0
                     ? `-$${selectedStipulation.cost / 1000}k`
-                    : "GRATIS"}
+                    : "FREE"}
                 </Text>
-                <Ionicons name="chevron-down" size={20} color="#CBD5E1" />
-              </View>
-            </TouchableOpacity>
+              </TouchableOpacity>
 
-            <View style={styles.extrasContainer}>
-              <View style={styles.extraRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.extraLabel, { color: "#B45309" }]}>
-                    🏆 Pelea Titular
-                  </Text>
-                  {isTitleMatch && (
+              {/* EXTRAS */}
+              <BlurView intensity={10} tint="dark" style={styles.extrasBox}>
+                <View style={styles.extraRow}>
+                  <View>
+                    <Text style={[styles.extraTitle, { color: "#F59E0B" }]}>
+                      TITLE MATCH
+                    </Text>
                     <TouchableOpacity
-                      onPress={() => setTitleModalVisible(true)}
+                      onPress={() => isTitleMatch && setTitleModalVisible(true)}
                     >
-                      <Text
-                        style={[
-                          styles.extraSub,
-                          {
-                            color: "#3B82F6",
-                            fontWeight: "bold",
-                            marginTop: 2,
-                          },
-                        ]}
-                      >
+                      <Text style={styles.extraSub}>
                         {titleInvolved
                           ? titleInvolved.name
-                          : "Seleccionar Título Vacante..."}
+                          : isTitleMatch
+                          ? "Select Title..."
+                          : "No"}
                       </Text>
                     </TouchableOpacity>
-                  )}
-                  {!isTitleMatch && <Text style={styles.extraSub}>No</Text>}
+                  </View>
+                  <Switch
+                    value={isTitleMatch}
+                    onValueChange={(val) => {
+                      setIsTitleMatch(val);
+                      if (val && !titleInvolved) setTitleModalVisible(true);
+                    }}
+                    trackColor={{ true: "#F59E0B", false: "#333" }}
+                  />
                 </View>
-                <Switch
-                  value={isTitleMatch}
-                  onValueChange={(val) => {
-                    setIsTitleMatch(val);
-                    if (val && !titleInvolved) {
-                      setTitleModalVisible(true);
-                    }
-                  }}
-                  trackColor={{ true: "#F59E0B", false: "#eee" }}
-                />
-              </View>
-
-              <View style={styles.extraRow}>
-                <View>
-                  <Text style={styles.extraLabel}>⚡ Interferencia</Text>
-                  <Text style={styles.extraSub}>
-                    Aumenta el drama (+${INTERFERENCE_COST})
-                  </Text>
+                <View
+                  style={[
+                    styles.extraRow,
+                    {
+                      borderTopWidth: 1,
+                      borderTopColor: "rgba(255,255,255,0.1)",
+                    },
+                  ]}
+                >
+                  <View>
+                    <Text style={[styles.extraTitle, { color: "#EF4444" }]}>
+                      INTERFERENCE
+                    </Text>
+                    <Text style={styles.extraSub}>
+                      Add drama (-${INTERFERENCE_COST})
+                    </Text>
+                  </View>
+                  <Switch
+                    value={hasInterference}
+                    onValueChange={setHasInterference}
+                    trackColor={{ true: "#EF4444", false: "#333" }}
+                  />
                 </View>
-                <Switch
-                  value={hasInterference}
-                  onValueChange={setHasInterference}
-                  trackColor={{ true: "#EF4444", false: "#eee" }}
-                />
-              </View>
-            </View>
-          </>
-        )}
-      </ScrollView>
+              </BlurView>
+            </>
+          )}
 
-      {/* FOOTER */}
-      <View style={styles.footer}>
-        <View style={styles.costContainer}>
-          <Text style={styles.totalLabel}>COSTO TOTAL</Text>
-          <Text
-            style={[
-              styles.totalValue,
-              { color: currentCost > 0 ? "#EF4444" : "#10B981" },
-            ]}
-          >
-            {currentCost > 0 ? `-$${currentCost.toLocaleString()}` : "GRATIS"}
-          </Text>
-        </View>
-        <TouchableOpacity onPress={handleSave} style={styles.saveBtnWrapper}>
-          <LinearGradient
-            colors={
-              segmentTab === "MATCH"
-                ? ["#1E293B", "#334155"]
-                : ["#7E22CE", "#A855F7"]
-            }
-            style={styles.saveGradient}
-          >
-            <Text style={styles.saveText}>
-              {isEditing ? "Guardar" : "Confirmar"}
+          {/* PROMO UI */}
+          {segmentTab === "PROMO" && (
+            <>
+              <Text style={styles.sectionTitle}>SEGMENT TYPE</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 20 }}
+              >
+                {PROMO_TYPES.map((p) => (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[
+                      styles.optionCard,
+                      selectedPromoType.id === p.id && {
+                        borderColor: "#D946EF",
+                        backgroundColor: "#D946EF20",
+                      },
+                    ]}
+                    onPress={() => handlePromoTypeChange(p)}
+                  >
+                    <MaterialCommunityIcons
+                      name={p.icon as any}
+                      size={24}
+                      color={
+                        selectedPromoType.id === p.id ? "#D946EF" : "#64748B"
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.optionText,
+                        selectedPromoType.id === p.id && { color: "#D946EF" },
+                      ]}
+                    >
+                      {p.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text style={styles.sectionTitle}>TALENT</Text>
+              <View style={styles.vsContainer}>
+                <View style={styles.fighterColumn}>
+                  <Text style={styles.columnTitle}>{getLabelForSlot(0)}</Text>
+                  <FighterCard
+                    index={0}
+                    fighter={participants[0]?.[0]}
+                    onPress={() => openSelectionModal(0)}
+                    widthStyle={CARD_WIDTH_LARGE}
+                  />
+                </View>
+                {selectedPromoType.isVs && (
+                  <>
+                    <View style={styles.vsBadge}>
+                      <Text style={styles.vsText}>VS</Text>
+                    </View>
+                    <View style={styles.fighterColumn}>
+                      <Text style={styles.columnTitle}>
+                        {getLabelForSlot(1)}
+                      </Text>
+                      <FighterCard
+                        index={1}
+                        fighter={participants[1]?.[0]}
+                        onPress={() => openSelectionModal(1)}
+                        widthStyle={CARD_WIDTH_LARGE}
+                      />
+                    </View>
+                  </>
+                )}
+              </View>
+            </>
+          )}
+        </ScrollView>
+
+        {/* FOOTER */}
+        <View style={styles.footer}>
+          <View>
+            <Text style={styles.costLabel}>TOTAL COST</Text>
+            <Text
+              style={[
+                styles.costValue,
+                currentCost > 0 ? { color: "#EF4444" } : { color: "#10B981" },
+              ]}
+            >
+              {currentCost > 0 ? `-$${currentCost.toLocaleString()}` : "FREE"}
             </Text>
-            <Ionicons name="checkmark" size={20} color="white" />
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
+          </View>
+          <TouchableOpacity onPress={handleSave} style={styles.confirmBtn}>
+            <LinearGradient
+              colors={[brandTheme || "#3B82F6", "#1E293B"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.confirmGradient}
+            >
+              <Text style={styles.confirmText}>CONFIRM</Text>
+              <Ionicons name="checkmark" size={20} color="#FFF" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
 
-      {/* MODAL SELECCIÓN LUCHADORES */}
+      {/* --- MODALS (Dark Glass) --- */}
+      {/* SELECTION MODAL */}
       <Modal
         visible={modalVisible}
         animationType="slide"
         presentationStyle="pageSheet"
       >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Seleccionar Luchador</Text>
-            <TouchableOpacity onPress={() => setModalVisible(false)}>
-              <Text style={styles.modalClose}>Cancelar</Text>
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={roster}
-            keyExtractor={(item) => item.id.toString()}
-            contentContainerStyle={{ padding: 20 }}
-            renderItem={({ item }) => {
-              // @ts-ignore
-              const isExpired = item.isDraft === 0 && item.weeksLeft <= 0;
-              return (
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={95} tint="dark" style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Talent</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Text style={{ color: "#EF4444" }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={roster}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={[styles.rosterItem, isExpired && { opacity: 0.5 }]}
+                  style={styles.rosterItem}
                   onPress={() => handleSelectLuchador(item)}
-                  disabled={isExpired}
                 >
                   {item.imageUri ? (
                     <Image
@@ -925,437 +825,343 @@ export default function PlannerScreen() {
                       <Text>{item.name.charAt(0)}</Text>
                     </View>
                   )}
-                  <View style={{ flex: 1, marginLeft: 12 }}>
+                  <View style={{ marginLeft: 10 }}>
                     <Text style={styles.rosterName}>{item.name}</Text>
-                    <Text style={styles.rosterClass}>
-                      {item.mainClass} • {item.gender}
+                    <Text style={styles.rosterSub}>
+                      {item.mainClass} • {item.crowd}
                     </Text>
                   </View>
-                  {isExpired && (
-                    <Text style={styles.expiredBadge}>VENCIDO</Text>
-                  )}
                 </TouchableOpacity>
-              );
-            }}
-          />
+              )}
+            />
+          </BlurView>
         </View>
       </Modal>
 
-      {/* MODAL SELECCIÓN TÍTULOS */}
-      <Modal
-        visible={titleModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Seleccionar Título Vacante</Text>
-            <TouchableOpacity onPress={() => setTitleModalVisible(false)}>
-              <Text style={styles.modalClose}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={getAvailableTitles()}
-            keyExtractor={(item) => item.id.toString()}
-            contentContainerStyle={{ padding: 20 }}
-            ListEmptyComponent={
-              <View style={{ padding: 20, alignItems: "center" }}>
-                <Text
-                  style={{
-                    textAlign: "center",
-                    color: "#64748B",
-                    marginBottom: 10,
-                  }}
-                >
-                  No hay títulos vacantes disponibles para este formato.
-                </Text>
-                <Text
-                  style={{
-                    textAlign: "center",
-                    color: "#94A3B8",
-                    fontSize: 12,
-                  }}
-                >
-                  (Si quieres defender un título con campeón, solo añade al
-                  campeón a la lucha).
-                </Text>
-              </View>
-            }
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.rosterItem}
-                onPress={() => {
-                  setTitleInvolved(item);
-                  setIsTitleMatch(true);
-                  setTitleModalVisible(false);
-                }}
-              >
-                <View
-                  style={[
-                    styles.rosterPlaceholder,
-                    { backgroundColor: "#FEF3C7" },
-                  ]}
-                >
-                  <Text>🏆</Text>
-                </View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.rosterName}>{item.name}</Text>
-                  <Text style={styles.rosterClass}>VACANTE</Text>
-                </View>
-                {item.id === titleInvolved?.id && (
-                  <Ionicons name="checkmark-circle" size={24} color="#3B82F6" />
-                )}
-              </TouchableOpacity>
-            )}
-          />
-        </View>
-      </Modal>
-
-      {/* MODAL SELECCIÓN ESTIPULACIÓN */}
+      {/* STIPULATION MODAL */}
       <Modal
         visible={stipulationModalVisible}
         animationType="slide"
         presentationStyle="pageSheet"
       >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Tipo de Combate</Text>
-            <TouchableOpacity onPress={() => setStipulationModalVisible(false)}>
-              <Text style={styles.modalClose}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={STIPULATIONS}
-            keyExtractor={(item) => item.name}
-            contentContainerStyle={{ padding: 20 }}
-            renderItem={({ item }) => (
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={95} tint="dark" style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Match Rules</Text>
               <TouchableOpacity
-                style={[
-                  styles.rosterItem,
-                  selectedStipulation.name === item.name && {
-                    backgroundColor: "#F0F9FF",
-                    borderColor: "#BAE6FD",
-                    borderWidth: 1,
-                  },
-                ]}
-                onPress={() => {
-                  setSelectedStipulation(item);
-                  setStipulationModalVisible(false);
-                }}
+                onPress={() => setStipulationModalVisible(false)}
               >
-                <View
-                  style={[
-                    styles.rosterPlaceholder,
-                    { backgroundColor: item.cost > 0 ? "#FEF2F2" : "#F0F9FF" },
-                  ]}
-                >
-                  <MaterialCommunityIcons
-                    name={item.icon as any}
-                    size={20}
-                    color={item.cost > 0 ? "#EF4444" : "#0EA5E9"}
-                  />
-                </View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.rosterName}>{item.name}</Text>
-                  <Text style={styles.rosterClass}>
-                    {item.cost > 0
-                      ? `Costo: $${item.cost}`
-                      : "Sin Costo Adicional"}
-                  </Text>
-                </View>
-                {selectedStipulation.name === item.name && (
-                  <Ionicons name="checkmark-circle" size={24} color="#3B82F6" />
-                )}
+                <Text style={{ color: "#EF4444" }}>Cancel</Text>
               </TouchableOpacity>
-            )}
-          />
+            </View>
+            <FlatList
+              data={STIPULATIONS}
+              keyExtractor={(item) => item.name}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.rosterItem,
+                    selectedStipulation.name === item.name && {
+                      backgroundColor: "rgba(255,255,255,0.1)",
+                    },
+                  ]}
+                  onPress={() => {
+                    setSelectedStipulation(item);
+                    setStipulationModalVisible(false);
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.iconBox,
+                      item.cost > 0 && { backgroundColor: "#EF444420" },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name={item.icon as any}
+                      size={20}
+                      color={item.cost > 0 ? "#EF4444" : "#FFF"}
+                    />
+                  </View>
+                  <View style={{ marginLeft: 10 }}>
+                    <Text style={styles.rosterName}>{item.name}</Text>
+                    <Text
+                      style={{
+                        color: item.cost > 0 ? "#EF4444" : "#10B981",
+                        fontSize: 12,
+                      }}
+                    >
+                      {item.cost > 0 ? `-$${item.cost}` : "No Extra Cost"}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </BlurView>
+        </View>
+      </Modal>
+
+      {/* TITLE MODAL */}
+      <Modal
+        visible={titleModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={95} tint="dark" style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Title</Text>
+              <TouchableOpacity onPress={() => setTitleModalVisible(false)}>
+                <Text style={{ color: "#EF4444" }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={getAvailableTitles()}
+              keyExtractor={(item) => item.id.toString()}
+              ListEmptyComponent={
+                <Text
+                  style={{
+                    color: "#64748B",
+                    textAlign: "center",
+                    marginTop: 20,
+                  }}
+                >
+                  No eligible vacant titles found.
+                </Text>
+              }
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.rosterItem}
+                  onPress={() => {
+                    setTitleInvolved(item);
+                    setIsTitleMatch(true);
+                    setTitleModalVisible(false);
+                  }}
+                >
+                  <Text style={{ fontSize: 20 }}>🏆</Text>
+                  <Text style={[styles.rosterName, { marginLeft: 10 }]}>
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </BlurView>
         </View>
       </Modal>
     </View>
   );
 }
 
-// ... ESTILOS ...
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F7FA" },
+  container: { flex: 1, backgroundColor: "#000" },
+  absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
-  // Header Page
-  pageHeader: {
+  header: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    padding: 20,
+    paddingTop: 10,
   },
-  backBtn: {
-    padding: 8,
-    backgroundColor: "white",
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#FFF",
+    letterSpacing: 1,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  pageTitle: {
-    flex: 1,
-    textAlign: "center",
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#1E293B",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
   },
 
-  scrollContent: { padding: 20, paddingBottom: 100 },
-
-  // Tabs
-  toggleContainer: {
+  tabContainer: {
     flexDirection: "row",
-    backgroundColor: "white",
-    borderRadius: 25,
-    padding: 4,
-    marginBottom: 25,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  toggleBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: "center",
-    borderRadius: 20,
-  },
-  toggleBtnActive: { backgroundColor: "#3B82F6" },
-  toggleText: { fontWeight: "700", color: "#64748B" },
-  toggleTextActive: { color: "white" },
-
-  sectionHeader: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#94A3B8",
-    marginBottom: 10,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  horizontalScroll: { marginBottom: 25, maxHeight: 100 },
-
-  // Option Cards (Format/Promo)
-  optionCard: {
-    width: 100,
-    height: 90,
-    backgroundColor: "white",
     borderRadius: 16,
+    padding: 4,
+    marginBottom: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderRadius: 12,
+  },
+  tabText: { color: "#94A3B8", fontWeight: "bold", fontSize: 12 },
+
+  sectionTitle: {
+    color: "#94A3B8",
+    fontSize: 11,
+    fontWeight: "900",
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+
+  optionCard: {
+    width: 90,
+    height: 80,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
-    borderWidth: 2,
-    borderColor: "transparent",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 1,
+    backgroundColor: "rgba(255,255,255,0.05)",
   },
   optionText: {
-    marginTop: 8,
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#334155",
+    color: "#64748B",
+    fontSize: 10,
+    fontWeight: "bold",
+    marginTop: 5,
     textAlign: "center",
   },
-  optionCost: { fontSize: 10, color: "#94A3B8", marginTop: 2 },
 
-  // Layout Styles
-  vsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 25,
-  },
-  rowContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 25,
+  vsContainer: { flexDirection: "row", justifyContent: "space-between" },
+  fighterColumn: { flex: 1, alignItems: "center" },
+  columnTitle: {
+    color: "#94A3B8",
+    fontSize: 10,
+    fontWeight: "bold",
+    marginBottom: 8,
   },
   gridContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    marginBottom: 25,
-  },
-  gridItem: {
-    width: "48%",
-    marginBottom: 15,
-    alignItems: "center",
-  },
-  fighterWrapper: { alignItems: "center", flex: 1 }, // Flex 1 es clave
-  teamColumn: { alignItems: "center", flex: 1 },
-
-  columnTitle: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: "#94A3B8",
-    marginBottom: 8,
-    textTransform: "uppercase",
   },
 
-  // CARDS
   slotCard: {
-    backgroundColor: "white",
+    height: 160,
     borderRadius: 16,
-    justifyContent: "center",
+    overflow: "hidden",
+    marginBottom: 10,
+  },
+  slotBlur: {
+    flex: 1,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 1,
-    paddingVertical: 15,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(0,0,0,0.3)",
   },
-  slotImageLarge: { width: 70, height: 70, borderRadius: 35, marginBottom: 8 },
-  slotPlaceholderLarge: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: "#F1F5F9",
+  slotImage: { width: 80, height: 80, borderRadius: 40, marginBottom: 10 },
+  slotPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  slotInitialsLarge: { fontSize: 28, fontWeight: "bold", color: "#94A3B8" },
-
-  slotName: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#334155",
-    textAlign: "center",
-    paddingHorizontal: 4,
-  },
+  slotInitials: { color: "#FFF", fontSize: 24, fontWeight: "bold" },
+  slotName: { color: "#FFF", fontSize: 12, fontWeight: "bold" },
   nameTag: {
-    backgroundColor: "#F8FAFC",
     paddingHorizontal: 8,
     paddingVertical: 4,
+    backgroundColor: "rgba(0,0,0,0.5)",
     borderRadius: 8,
-    marginTop: 4,
   },
-  emptySlotContent: { alignItems: "center", opacity: 0.5 },
-  addText: { fontSize: 12, fontWeight: "600", color: "#64748B", marginTop: 4 },
+  emptySlotContent: { alignItems: "center" },
+  addText: { color: "#64748B", fontSize: 12, fontWeight: "bold", marginTop: 5 },
   removeBtn: {
     position: "absolute",
     top: 5,
     right: 5,
-    backgroundColor: "#EF4444",
-    borderRadius: 12,
-    padding: 4,
+    padding: 5,
+    backgroundColor: "rgba(239, 68, 68, 0.8)",
+    borderRadius: 10,
   },
 
-  vsBadgeLarge: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#E2E8F0",
-    justifyContent: "center",
-    alignItems: "center",
-    marginHorizontal: 5,
-  },
-  vsTextLarge: { fontSize: 14, fontWeight: "900", color: "#94A3B8" },
   vsBadge: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: "#E2E8F0",
+    backgroundColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
-    marginHorizontal: 5,
+    marginTop: 60,
   },
-  vsText: { fontSize: 10, fontWeight: "900", color: "#94A3B8" },
+  vsText: { color: "#FFF", fontWeight: "900", fontSize: 10 },
 
-  // STIPULATION SELECTOR BUTTON
-  stipulationSelector: {
+  stipBtn: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "white",
-    padding: 16,
+    padding: 15,
+    backgroundColor: "rgba(255,255,255,0.05)",
     borderRadius: 16,
-    marginBottom: 25,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 2,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  stipulationLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-  stipulationIconBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  iconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
   },
-  stipulationLabel: {
-    fontSize: 10,
-    color: "#94A3B8",
-    fontWeight: "bold",
-    textTransform: "uppercase",
-  },
-  stipulationValue: { fontSize: 16, fontWeight: "700", color: "#1E293B" },
-  stipulationRight: { alignItems: "flex-end" },
-  stipulationCost: { fontSize: 12, fontWeight: "700", marginBottom: 4 },
+  stipLabel: { color: "#94A3B8", fontSize: 10, fontWeight: "bold" },
+  stipValue: { color: "#FFF", fontSize: 14, fontWeight: "bold" },
 
-  // Extras (Toggle Rows)
-  extrasContainer: { backgroundColor: "white", borderRadius: 16, padding: 5 },
+  extrasBox: {
+    borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
   extraRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
   },
-  extraLabel: { fontSize: 14, fontWeight: "bold", color: "#1E293B" },
-  extraSub: { fontSize: 11, color: "#64748B" },
+  extraTitle: { fontSize: 12, fontWeight: "bold" },
+  extraSub: { color: "#94A3B8", fontSize: 11 },
 
-  // Footer
   footer: {
     position: "absolute",
     bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "white",
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     padding: 20,
     paddingBottom: 40,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: "#000",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  costLabel: { color: "#94A3B8", fontSize: 10, fontWeight: "bold" },
+  costValue: { fontSize: 18, fontWeight: "900" },
+  confirmBtn: {
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
   },
-  costContainer: { flexDirection: "column" },
-  totalLabel: { fontSize: 10, fontWeight: "bold", color: "#94A3B8" },
-  totalValue: { fontSize: 20, fontWeight: "900" },
-  saveBtnWrapper: { flex: 1, marginLeft: 20 },
-  saveGradient: {
-    paddingVertical: 16,
+  confirmGradient: {
+    flexDirection: "row",
+    paddingHorizontal: 24,
+    paddingVertical: 14,
     borderRadius: 16,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
     gap: 8,
+    alignItems: "center",
   },
-  saveText: { color: "white", fontWeight: "bold", fontSize: 16 },
+  confirmText: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
 
-  // Modal
+  // MODALS
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.8)" },
   modalContent: {
     flex: 1,
-    backgroundColor: "#F5F7FA",
+    backgroundColor: "#111",
     marginTop: 50,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -1363,47 +1169,27 @@ const styles = StyleSheet.create({
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
     padding: 20,
-    backgroundColor: "white",
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderBottomColor: "rgba(255,255,255,0.1)",
   },
-  modalTitle: { fontSize: 18, fontWeight: "800", color: "#1E293B" },
-  modalClose: { color: "#3B82F6", fontWeight: "600" },
+  modalTitle: { color: "#FFF", fontSize: 18, fontWeight: "bold" },
   rosterItem: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "white",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.05)",
   },
-  rosterAvatar: { width: 44, height: 44, borderRadius: 22 },
+  rosterAvatar: { width: 40, height: 40, borderRadius: 20 },
   rosterPlaceholder: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#F1F5F9",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#333",
     justifyContent: "center",
     alignItems: "center",
   },
-  rosterName: { fontSize: 14, fontWeight: "bold", color: "#1E293B" },
-  rosterClass: { fontSize: 12, color: "#64748B" },
-  expiredBadge: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: "#EF4444",
-    backgroundColor: "#FEF2F2",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
+  rosterName: { color: "#FFF", fontSize: 14, fontWeight: "bold" },
+  rosterSub: { color: "#94A3B8", fontSize: 12 },
 });

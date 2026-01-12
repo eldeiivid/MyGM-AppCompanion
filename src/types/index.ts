@@ -1,7 +1,6 @@
 // src/types/index.ts
 
 export type Gender = "Male" | "Female";
-// Agregamos "None" para la clase secundaria cuando aún no se desbloquea
 export type WrestlingClass =
   | "Giant"
   | "Cruiser"
@@ -13,9 +12,10 @@ export type WrestlingClass =
 export type CrowdReaction = "Face" | "Heel";
 export type TitleCategory = "World" | "Midcard" | "Tag" | "Other";
 
-// 1. EL LUCHADOR
+// 1. EL LUCHADOR (Actualizado V2)
 export interface Luchador {
   id: number;
+  save_id: number; // Añadido para consistencia con la DB
 
   // Datos del Roster & Contrato
   name: string;
@@ -23,15 +23,16 @@ export interface Luchador {
   crowd: CrowdReaction;
   ringLevel: number;
   mainClass: WrestlingClass;
-  altClass: WrestlingClass; // Ahora obligatorio (por defecto "None")
+  altClass: WrestlingClass;
   mic: number;
 
-  // --- NUEVO: Gestión de GM ---
-  weeksLeft: number; // Semanas restantes (Draft = 25, Agente Libre = X)
-  hiringCost: number; // Costo total del contrato
-  popularity: number; // Valor de 0-100 para ratings del show
+  // --- GESTIÓN DE GM ---
+  weeksLeft: number;
+  hiringCost: number;
+  isDraft: number; // <--- SOLUCIÓN AL ERROR: 0 = Libre, 1 = Draft Permanente
+  popularity: number;
 
-  // Match History (Contadores para WWE 2K25)
+  // Match History
   mitbWins: number;
   mitbLosses: number;
   cashInWins: number;
@@ -42,8 +43,8 @@ export interface Luchador {
   chamberLosses: number;
   pleWins: number;
   pleLosses: number;
-  normalWins: number; // Aquí pondrás tus victorias manuales
-  normalLosses: number; // Aquí pondrás tus derrotas manuales
+  normalWins: number;
+  normalLosses: number;
 
   // Career Prime
   worldTitles: number;
@@ -58,38 +59,35 @@ export interface Luchador {
   imageUri?: string | null;
 }
 
-// 2. CAMPEONATOS (Estructura para soportar Tag y MITB)
+// 2. CAMPEONATOS
 export interface Title {
   id: number;
+  save_id: number;
   name: string;
   category: TitleCategory;
   gender: Gender | "Mixed";
-
-  // Portadores ( holderId2 solo se usa si category es "Tag" )
   holderId1: number | null;
   holderId2: number | null;
-
-  weekWon: number; // Semana en la que inició el reinado actual
-  isMITB: boolean; // Para identificar maletines en la pestaña "Otros"
-
+  weekWon: number;
+  isMITB: number; // Cambiado a number (0/1) para coincidir con SQLite
   holderName1?: string;
   holderName2?: string;
+  defenses?: number; // <--- NUEVO V2: Para el Log de defensas
 }
 
-// 3. HISTORIAL DE REINADOS (Timeline)
-export interface TitleReign {
+// 3. RIVALIDADES (NUEVO TIPO V2)
+export interface Rivalry {
   id: number;
-  titleId: number;
-  luchadorId1: number;
-  luchadorId2: number | null; // Para campeones en pareja
-
-  weekWon: number;
-  weekLost: number | null;
-
-  lostToId1: number | null; // Quién le quitó el título (Luchador 1)
-  lostToId2: number | null; // Quién le quitó el título (Luchador 2)
-
-  isCashIn: boolean; // ¿El título cambió por un canjeo de MITB?
+  save_id: number;
+  luchador_id1: number;
+  luchador_id2: number;
+  level: number; // 1 a 4
+  type: string; // '1v1' o 'Tag'
+  is_active: number; // 0 o 1
+  name1?: string; // Para la UI
+  name2?: string;
+  image1?: string;
+  image2?: string;
 }
 
 // 4. FINANZAS (Ajustado para tus tipos de ganancia)
