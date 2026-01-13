@@ -1,13 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import { Image } from "expo-image"; // <--- AÑADIDO: Componente optimizado
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   Dimensions,
   FlatList,
-  // Image, <--- ELIMINADO DE AQUÍ
   LayoutAnimation,
   Modal,
   Platform,
@@ -15,6 +14,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   UIManager,
   View,
@@ -32,10 +32,10 @@ import {
   getRivalryMatches,
 } from "../../src/database/operations";
 
-// --- IMPORTAR EL HELPER DE IMÁGENES ---
+// Image Helper
 import { getWrestlerImage } from "../../src/utils/imageHelper";
 
-// Enable LayoutAnimation for Android
+// Enable LayoutAnimation
 if (
   Platform.OS === "android" &&
   UIManager.setLayoutAnimationEnabledExperimental
@@ -46,7 +46,11 @@ if (
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
 
-// --- FILTER OPTIONS ---
+// URL Base
+const TITLES_REPO_URL =
+  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/titles/";
+
+// Options
 const SORT_OPTIONS = [
   { id: "Name", label: "Name (A-Z)" },
   { id: "RatingDesc", label: "Rating (High-Low)" },
@@ -73,6 +77,8 @@ export default function LockerRoomScreen() {
     "Talents" | "Championships" | "Rivalries"
   >("Talents");
 
+  const [searchQuery, setSearchQuery] = useState("");
+
   // Modals
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [rivalryModalVisible, setRivalryModalVisible] = useState(false);
@@ -80,21 +86,52 @@ export default function LockerRoomScreen() {
   const [selectedRivalryData, setSelectedRivalryData] = useState<any>(null);
   const [rivalryHistory, setRivalryHistory] = useState<any[]>([]);
 
-  // Rivalry Creation State
+  // Rivalry Creation
   const [selectedRival1, setSelectedRival1] = useState<number | null>(null);
   const [selectedRival2, setSelectedRival2] = useState<number | null>(null);
 
-  // Filter States
-  const [filters, setFilters] = useState({
+  // Filters
+  const INITIAL_FILTERS = {
     sortBy: "Name",
     status: "All",
     gender: "Todos",
     role: "Todos",
     fighterClass: "Todos",
-  });
+  };
+  const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [tempFilters, setTempFilters] = useState(filters);
 
-  // Load Data
+  // --- HELPERS ---
+  const getTitleImage = (title: any) => {
+    if (title.imageUri && title.imageUri !== "") {
+      return `${TITLES_REPO_URL}${title.imageUri}`;
+    }
+    const gender = title.gender === "Female" ? "female" : "male";
+    if (
+      title.isMITB === 1 ||
+      title.name.includes("MITB") ||
+      title.name.includes("Briefcase")
+    ) {
+      return `${TITLES_REPO_URL}${gender}-moneyinthebank.png`;
+    }
+    let brand = "raw";
+    const nameLower = title.name.toLowerCase();
+    if (nameLower.includes("smackdown") || nameLower.includes("universal"))
+      brand = "smackdown";
+    else if (nameLower.includes("nxt")) brand = "nxt";
+    else if (nameLower.includes("aew")) brand = "aew";
+
+    let division = "world";
+    const cat = title.category || title.type || "";
+    if (cat === "Midcard") division = "midcard";
+    else if (cat === "Tag") division = "tagteam";
+
+    if (division === "tagteam" && gender === "female") {
+      return `${TITLES_REPO_URL}female-tagteam.webp`;
+    }
+    return `${TITLES_REPO_URL}${brand}-${gender}-${division}.webp`;
+  };
+
   const loadData = async () => {
     if (!saveId) return;
     setLoading(true);
@@ -103,23 +140,19 @@ export default function LockerRoomScreen() {
     const titlesData = getAllTitles(saveId);
     let rivalriesData = getActiveRivalries(saveId);
 
-    // --- NUEVO: Calcular el Heat Real basado en promedio de estrellas ---
     rivalriesData = rivalriesData.map((r: any) => {
       const matches = getRivalryMatches(saveId, r.luchador_id1, r.luchador_id2);
-      if (matches.length === 0) return { ...r, calculatedHeat: 1 }; // Base level
-
+      if (matches.length === 0) return { ...r, calculatedHeat: 1 };
       const totalStars = matches.reduce(
         (sum: number, m: any) => sum + (m.rating || 0),
         0
       );
       const avg = totalStars / matches.length;
-
       let heat = 1;
       if (avg >= 4.5) heat = 5;
       else if (avg >= 3.5) heat = 4;
       else if (avg >= 2.5) heat = 3;
       else if (avg >= 1.5) heat = 2;
-
       return { ...r, calculatedHeat: heat };
     });
 
@@ -135,6 +168,7 @@ export default function LockerRoomScreen() {
     }, [saveId])
   );
 
+  // Handlers
   const handleCreateRivalry = () => {
     if (selectedRival1 && selectedRival2 && saveId) {
       createRivalry(saveId, selectedRival1, selectedRival2, 1);
@@ -157,22 +191,22 @@ export default function LockerRoomScreen() {
       rivalryItem.luchador_id1,
       rivalryItem.luchador_id2
     );
-
     const r1 = roster.find((r) => r.id === rivalryItem.luchador_id1);
     const r2 = roster.find((r) => r.id === rivalryItem.luchador_id2);
-
-    setSelectedRivalryData({
-      ...rivalryItem,
-      r1,
-      r2,
-    });
+    setSelectedRivalryData({ ...rivalryItem, r1, r2 });
     setRivalryHistory(history);
     setRivalryDetailVisible(true);
   };
 
-  // --- FILTER LOGIC ---
+  // --- LOGICA DE FILTROS ---
   const getProcessedRoster = () => {
     let data = [...roster];
+
+    if (searchQuery.trim() !== "") {
+      const query = searchQuery.toLowerCase();
+      data = data.filter((l) => l.name.toLowerCase().includes(query));
+    }
+
     if (filters.gender !== "Todos")
       data = data.filter((l) => l.gender === filters.gender);
     if (filters.role !== "Todos")
@@ -209,71 +243,161 @@ export default function LockerRoomScreen() {
 
   const filteredData = getProcessedRoster();
 
-  // --- RENDERERS ---
+  // --- NUEVA SECCIÓN: FILTROS ACTIVOS VISIBLES ---
+  const renderActiveFilters = () => {
+    const activeFilters = [];
+    if (filters.gender !== "Todos")
+      activeFilters.push({
+        type: "gender",
+        label: filters.gender,
+        resetValue: "Todos",
+      });
+    if (filters.role !== "Todos")
+      activeFilters.push({
+        type: "role",
+        label: filters.role,
+        resetValue: "Todos",
+      });
+    if (filters.status !== "All")
+      activeFilters.push({
+        type: "status",
+        label: filters.status,
+        resetValue: "All",
+      });
+
+    // El ordenamiento no siempre se considera "filtro activo" visualmente, pero se puede añadir si quieres.
+
+    if (activeFilters.length === 0) return null;
+
+    return (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.activeFiltersContainer}
+      >
+        <TouchableOpacity
+          style={styles.clearAllBadge}
+          onPress={() => setFilters(INITIAL_FILTERS)}
+        >
+          <Text style={styles.clearAllText}>Clear All</Text>
+          <Ionicons name="close-circle" size={14} color="#FFF" />
+        </TouchableOpacity>
+
+        {activeFilters.map((f, i) => (
+          <TouchableOpacity
+            key={i}
+            style={styles.activeBadge}
+            onPress={() => setFilters({ ...filters, [f.type]: f.resetValue })}
+          >
+            <Text style={styles.activeBadgeText}>{f.label}</Text>
+            <Ionicons name="close" size={12} color="#CBD5E1" />
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    );
+  };
+
+  // --- NUEVO DISEÑO DE CARTA CORREGIDO (Estilo FUT) ---
   const renderWrestlerCard = ({ item }: { item: any }) => {
     const isExpired = item.isDraft === 0 && item.weeksLeft <= 0;
     const isHeel = item.crowd === "Heel";
-    const alignmentColor = isHeel ? "#EF4444" : "#3B82F6";
     const hasTitle = titles.some(
       (t) => t.holderId1 === item.id || t.holderId2 === item.id
     );
 
+    // Definimos colores
+    const gradientColors = isHeel
+      ? ["#7f1d1d", "#0f0f0f"] // Rojo a oscuro
+      : ["#1e3a8a", "#0f0f0f"]; // Azul a oscuro
+
+    const borderColor = hasTitle ? "#F59E0B" : "rgba(255,255,255,0.2)";
+
     return (
       <TouchableOpacity
-        activeOpacity={0.85}
+        activeOpacity={0.9}
         onPress={() => router.push(`../luchador/${item.id}`)}
         style={[styles.cardContainer, isExpired && { opacity: 0.5 }]}
       >
-        <BlurView
-          intensity={20}
-          tint="dark"
-          style={[styles.cardBlur, { borderColor: `${alignmentColor}40` }]}
+        <LinearGradient
+          colors={gradientColors as any}
+          style={[
+            styles.cardBackground,
+            { borderColor: borderColor, borderWidth: hasTitle ? 2 : 1 },
+          ]}
         >
-          <View style={styles.cardHeader}>
-            {hasTitle && <Ionicons name="trophy" size={14} color="#FFD700" />}
-          </View>
-          <View style={styles.imageWrapper}>
-            {/* --- EXPO IMAGE --- */}
-            <Image
-              source={{ uri: getWrestlerImage(item.imageUri) }}
-              style={styles.wrestlerImage}
-              contentFit="cover"
-              transition={500}
-            />
-          </View>
-          <View style={styles.cardInfo}>
-            <Text style={styles.wrestlerName} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <View style={styles.statsRow}>
-              <Text style={[styles.statText, { color: alignmentColor }]}>
-                {item.crowd}
-              </Text>
-              <Text style={styles.statDivider}>•</Text>
-              <Text style={styles.statText}>Lvl {item.ringLevel}</Text>
+          {/* 1. IMAGEN DEL LUCHADOR (Detrás del texto, ocupando todo) */}
+          <Image
+            source={{ uri: getWrestlerImage(item.imageUri) }}
+            style={styles.wrestlerImage}
+            contentFit="cover"
+            transition={500}
+          />
+
+          {/* 2. HEADER: RATING (Arriba Izquierda) */}
+          <View style={styles.cardHeaderOverlay}>
+            <View style={styles.ratingContainer}>
+              <Text style={styles.ratingNumber}>{item.ringLevel}</Text>
+              <Text style={styles.ratingLabel}>OVR</Text>
+            </View>
+            {/* ICONOS (Arriba Derecha) */}
+            <View style={styles.statusIcons}>
+              {hasTitle && <Ionicons name="trophy" size={14} color="#F59E0B" />}
             </View>
           </View>
-          <View
-            style={[styles.alignmentBar, { backgroundColor: alignmentColor }]}
-          />
-        </BlurView>
+
+          {/* 3. FOOTER: NOMBRE (Abajo, con fondo oscuro para leerse bien) */}
+          <LinearGradient
+            colors={["transparent", "rgba(0,0,0,0.9)", "#000"] as any}
+            style={styles.cardFooter}
+          >
+            <Text
+              style={styles.wrestlerName}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {item.name.toUpperCase()}
+            </Text>
+            <View style={styles.statsRow}>
+              <Text
+                style={[
+                  styles.statText,
+                  { color: isHeel ? "#FCA5A5" : "#93C5FD" },
+                ]}
+              >
+                {item.crowd.toUpperCase()}
+              </Text>
+              <Text style={styles.statDivider}>•</Text>
+              <Text style={styles.statText}>
+                {item.mainClass.toUpperCase()}
+              </Text>
+            </View>
+          </LinearGradient>
+        </LinearGradient>
       </TouchableOpacity>
     );
   };
 
+  // ... (renderTitleCard y renderRivalryCard se mantienen igual por brevedad, o puedes usar los anteriores)
   const renderTitleCard = ({ item }: { item: any }) => {
     const holder1 = roster.find((l) => l.id === item.holderId1);
     const holder2 = roster.find((l) => l.id === item.holderId2);
+    const titleImageUri = getTitleImage(item);
+
     return (
       <TouchableOpacity
         style={styles.titleCardContainer}
         onPress={() => router.push(`/titles/${item.id}`)}
       >
         <BlurView intensity={25} tint="dark" style={styles.titleCardBlur}>
+          <View style={styles.titleImageContainer}>
+            <Image
+              source={{ uri: titleImageUri }}
+              style={styles.titleImage}
+              contentFit="contain"
+              transition={500}
+            />
+          </View>
           <View style={styles.titleInfo}>
-            <Text style={styles.titleCategory}>
-              {item.category.toUpperCase()}
-            </Text>
             <Text style={styles.titleName}>{item.name}</Text>
             <View style={styles.holderRow}>
               {holder1 ? (
@@ -282,7 +406,6 @@ export default function LockerRoomScreen() {
                     source={{ uri: getWrestlerImage(holder1.imageUri) }}
                     style={styles.holderAvatar}
                     contentFit="cover"
-                    transition={500}
                   />
                   <Text style={styles.holderName}>{holder1.name}</Text>
                 </View>
@@ -297,7 +420,6 @@ export default function LockerRoomScreen() {
                     source={{ uri: getWrestlerImage(holder2.imageUri) }}
                     style={styles.holderAvatar}
                     contentFit="cover"
-                    transition={500}
                   />
                   <Text style={styles.holderName}>{holder2.name}</Text>
                 </View>
@@ -314,12 +436,9 @@ export default function LockerRoomScreen() {
     const r1 = roster.find((r) => r.id === item.luchador_id1);
     const r2 = roster.find((r) => r.id === item.luchador_id2);
     if (!r1 || !r2) return null;
-
     const heatLevel = item.calculatedHeat || item.level || 1;
-
     let heatColor = "#3B82F6";
     let heatLabel = "DULL";
-
     if (heatLevel >= 5) {
       heatColor = "#EF4444";
       heatLabel = "LEGENDARY";
@@ -349,13 +468,11 @@ export default function LockerRoomScreen() {
                 { borderColor: r1.crowd === "Face" ? "#3B82F6" : "#EF4444" },
               ]}
               contentFit="cover"
-              transition={500}
             />
             <Text style={styles.rivalName} numberOfLines={1}>
               {r1.name}
             </Text>
           </View>
-
           <View style={styles.rivalCenter}>
             <Text style={styles.vsText}>VS</Text>
             <View style={styles.heatMeterContainer}>
@@ -373,7 +490,6 @@ export default function LockerRoomScreen() {
               {heatLabel}
             </Text>
           </View>
-
           <View style={styles.rivalSide}>
             <Image
               source={{ uri: getWrestlerImage(r2.imageUri) }}
@@ -382,13 +498,11 @@ export default function LockerRoomScreen() {
                 { borderColor: r2.crowd === "Face" ? "#3B82F6" : "#EF4444" },
               ]}
               contentFit="cover"
-              transition={500}
             />
             <Text style={styles.rivalName} numberOfLines={1}>
               {r2.name}
             </Text>
           </View>
-
           <TouchableOpacity
             style={styles.deleteRivalryBtn}
             onPress={() => handleDeleteRivalry(item.id)}
@@ -422,6 +536,31 @@ export default function LockerRoomScreen() {
           )}
         </View>
 
+        {/* SEARCH BAR */}
+        {activeTab === "Talents" && (
+          <View style={styles.searchContainer}>
+            <Ionicons
+              name="search"
+              size={18}
+              color="#94A3B8"
+              style={{ marginRight: 8 }}
+            />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search superstar..."
+              placeholderTextColor="#64748B"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery("")}>
+                <Ionicons name="close-circle" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         <View style={styles.segmentContainer}>
           <BlurView intensity={30} tint="light" style={styles.segmentBlur}>
             {["Talents", "Championships", "Rivalries"].map((tab) => (
@@ -451,6 +590,9 @@ export default function LockerRoomScreen() {
           </BlurView>
         </View>
 
+        {/* ACTIVE FILTERS (VISIBLE) */}
+        {activeTab === "Talents" && renderActiveFilters()}
+
         {activeTab === "Talents" ? (
           <FlatList
             key="talents-grid"
@@ -461,6 +603,11 @@ export default function LockerRoomScreen() {
             columnWrapperStyle={{ justifyContent: "space-between" }}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No talents found.</Text>
+              </View>
+            }
           />
         ) : activeTab === "Championships" ? (
           <FlatList
@@ -492,7 +639,7 @@ export default function LockerRoomScreen() {
           />
         )}
 
-        {/* FABs */}
+        {/* FABs (Igual que antes) */}
         {activeTab === "Talents" && (
           <TouchableOpacity
             style={styles.fab}
@@ -507,7 +654,6 @@ export default function LockerRoomScreen() {
             </LinearGradient>
           </TouchableOpacity>
         )}
-
         {activeTab === "Rivalries" && (
           <TouchableOpacity
             style={styles.fab}
@@ -524,7 +670,7 @@ export default function LockerRoomScreen() {
         )}
       </SafeAreaView>
 
-      {/* FILTER MODAL */}
+      {/* FILTER MODAL (Igual que antes) */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -586,7 +732,7 @@ export default function LockerRoomScreen() {
         </BlurView>
       </Modal>
 
-      {/* NEW RIVALRY MODAL */}
+      {/* NEW RIVALRY MODAL (Igual) */}
       <Modal
         visible={rivalryModalVisible}
         animationType="slide"
@@ -688,7 +834,7 @@ export default function LockerRoomScreen() {
         </View>
       </Modal>
 
-      {/* RIVALRY HISTORY MODAL */}
+      {/* RIVALRY HISTORY MODAL (Igual) */}
       <Modal
         visible={rivalryDetailVisible}
         animationType="slide"
@@ -702,7 +848,6 @@ export default function LockerRoomScreen() {
               <Ionicons name="close-circle" size={30} color="#64748B" />
             </TouchableOpacity>
           </View>
-
           <View style={styles.detailVsHeader}>
             <View style={{ alignItems: "center" }}>
               <Image
@@ -732,7 +877,6 @@ export default function LockerRoomScreen() {
               </Text>
             </View>
           </View>
-
           <ScrollView contentContainerStyle={{ padding: 20 }}>
             <Text style={styles.sectionHeader}>MATCH HISTORY</Text>
             {rivalryHistory.length === 0 ? (
@@ -844,6 +988,60 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+  // SEARCH
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    marginHorizontal: 20,
+    marginBottom: 20,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  searchInput: { flex: 1, color: "white", fontSize: 14, fontWeight: "600" },
+
+  // ACTIVE FILTERS
+  activeFiltersContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 15,
+    alignItems: "center",
+  },
+  clearAllBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EF4444",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    marginRight: 8,
+  },
+  clearAllText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "bold",
+    marginRight: 4,
+  },
+  activeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  activeBadgeText: {
+    color: "#CBD5E1",
+    fontSize: 10,
+    fontWeight: "600",
+    marginRight: 4,
+  },
+
   segmentContainer: { paddingHorizontal: 20, marginBottom: 20 },
   segmentBlur: {
     flexDirection: "row",
@@ -863,59 +1061,109 @@ const styles = StyleSheet.create({
 
   listContent: { paddingHorizontal: 20, paddingBottom: 150 },
 
+  // --- NEW CARD STYLES (FUT-Inspired) ---
   cardContainer: {
     width: CARD_WIDTH,
-    height: 200,
+    height: 240, // Un poco más alta para mejor proporción
     marginBottom: 20,
-    borderRadius: 20,
-    overflow: "hidden",
+    borderRadius: 12,
+    // Sombra para dar profundidad
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 5,
+    elevation: 6,
   },
-  cardBlur: {
+  cardBackground: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    borderRadius: 20,
+    borderRadius: 12,
+    overflow: "hidden", // CLAVE: Que la imagen no se salga
+    position: "relative", // Para que los hijos absolutos se guíen por esto
   },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    padding: 8,
+
+  // Imagen llenando la tarjeta pero empezando un poco más abajo
+  wrestlerImage: {
+    width: "110%", // Un poco más grande para efecto zoom
+    height: "110%",
+    position: "absolute",
+    bottom: -10, // Ajuste para que la cara quede centrada
+    left: -5,
+  },
+
+  // Header (Rating)
+  cardHeaderOverlay: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    padding: 10,
+    zIndex: 10, // Asegura que esté encima de la imagen
   },
-  imageWrapper: {
-    flex: 1,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    justifyContent: "flex-end",
+  ratingContainer: {
     alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.4)", // Fondo sutil para contraste
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
-  wrestlerImage: { width: "100%", height: "100%" },
-  placeholderImage: {
-    width: "100%",
-    height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  placeholderText: {
-    fontSize: 40,
+  ratingNumber: {
+    color: "#FFF",
+    fontSize: 20,
     fontWeight: "900",
-    color: "rgba(255,255,255,0.1)",
+    lineHeight: 22,
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
-  cardInfo: { padding: 10, backgroundColor: "rgba(0,0,0,0.3)" },
+  ratingLabel: {
+    color: "#CBD5E1",
+    fontSize: 8,
+    fontWeight: "700",
+    marginTop: -2,
+  },
+  statusIcons: {
+    justifyContent: "flex-start",
+  },
+
+  // Footer (Nombre) - PEGADO ABAJO
+  cardFooter: {
+    position: "absolute", // ESTO ARREGLA EL PROBLEMA
+    bottom: -1,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 10,
+    paddingBottom: 12,
+    paddingTop: 30, // Espacio para el gradiente transparente
+    justifyContent: "flex-end",
+  },
   wrestlerName: {
     color: "white",
-    fontWeight: "800",
-    fontSize: 14,
-    marginBottom: 4,
+    fontWeight: "900",
+    fontSize: 15,
+    marginBottom: 2,
+    letterSpacing: 0.5,
+    textShadowColor: "rgba(0,0,0,1)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
-  statsRow: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
-  statText: { fontSize: 10, color: "#CBD5E1", fontWeight: "600" },
-  statDivider: { fontSize: 10, color: "#64748B", marginHorizontal: 4 },
-  alignmentBar: { height: 3, width: "100%" },
+  statsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  statText: {
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  statDivider: {
+    fontSize: 9,
+    color: "#64748B",
+    marginHorizontal: 5,
+  },
 
+  // --- TITLE CARD STYLES ---
   titleCardContainer: {
     marginBottom: 15,
     borderRadius: 20,
@@ -929,17 +1177,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
   },
-  titleInfo: { flex: 1 },
-  titleCategory: {
-    color: "#94A3B8",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1,
-    marginBottom: 4,
+  titleImageContainer: {
+    width: 80,
+    height: 60,
+    marginRight: 15,
+    justifyContent: "center",
+    alignItems: "center",
   },
+  titleImage: { width: "100%", height: "100%" },
+  titleInfo: { flex: 1 },
   titleName: {
     color: "white",
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "900",
     marginBottom: 10,
   },
@@ -956,6 +1205,7 @@ const styles = StyleSheet.create({
   holderName: { color: "white", fontSize: 12, fontWeight: "700" },
   vacantText: { color: "#64748B", fontSize: 12, fontStyle: "italic" },
 
+  // --- RIVALRY STYLES ---
   rivalryCard: { marginBottom: 15, borderRadius: 20, overflow: "hidden" },
   rivalryBlur: {
     flexDirection: "row",
@@ -971,13 +1221,6 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     borderWidth: 2,
-    marginBottom: 5,
-  },
-  rivalPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#333",
     marginBottom: 5,
   },
   rivalName: {
@@ -1008,7 +1251,6 @@ const styles = StyleSheet.create({
 
   emptyState: { alignItems: "center", marginTop: 50 },
   emptyText: { color: "rgba(255,255,255,0.3)", marginTop: 10, fontSize: 14 },
-
   fab: { position: "absolute", bottom: 120, right: 20 },
   fabGradient: {
     width: 56,
@@ -1059,7 +1301,6 @@ const styles = StyleSheet.create({
   },
   applyBtn: { paddingVertical: 16, borderRadius: 16, alignItems: "center" },
   applyBtnText: { color: "white", fontWeight: "bold", fontSize: 16 },
-
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
@@ -1100,7 +1341,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "600",
   },
-
   detailHeader: {
     flexDirection: "row",
     justifyContent: "space-between",

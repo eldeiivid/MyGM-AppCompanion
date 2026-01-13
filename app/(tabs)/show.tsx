@@ -1,11 +1,11 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   Alert,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -21,7 +21,7 @@ import {
 import DraggableFlatList, {
   RenderItemParams,
   ScaleDecorator,
-} from "react-native-draggable-flatlist"; // <--- LIBRERÍA DRAG & DROP
+} from "react-native-draggable-flatlist";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useGame } from "../../src/context/GameContext";
@@ -36,6 +36,11 @@ import {
   resolveMatch,
 } from "../../src/database/operations";
 import { Luchador } from "../../src/types";
+import { getWrestlerImage } from "../../src/utils/imageHelper";
+
+// --- URL BASE PARA TÍTULOS ---
+const TITLES_REPO_URL =
+  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/titles/";
 
 export default function ShowScreen() {
   const router = useRouter();
@@ -66,9 +71,47 @@ export default function ShowScreen() {
     others: "",
   });
 
+  // --- HELPER: CONSTRUIR URL DEL TÍTULO (Reutilizado) ---
+  const getTitleImage = (titleId: number) => {
+    const title = titles.find((t) => t.id === titleId);
+    if (!title) return null;
+
+    // 1. PRIORIDAD: DB
+    if (title.imageUri && title.imageUri !== "") {
+      return `${TITLES_REPO_URL}${title.imageUri}`;
+    }
+
+    // 2. FALLBACK
+    const gender = title.gender === "Female" ? "female" : "male";
+    if (
+      title.isMITB === 1 ||
+      title.name.includes("MITB") ||
+      title.name.includes("Briefcase")
+    ) {
+      return `${TITLES_REPO_URL}${gender}-moneyinthebank.png`;
+    }
+
+    let brand = "raw";
+    const nameLower = title.name.toLowerCase();
+    if (nameLower.includes("smackdown") || nameLower.includes("universal"))
+      brand = "smackdown";
+    else if (nameLower.includes("nxt")) brand = "nxt";
+    else if (nameLower.includes("aew")) brand = "aew";
+
+    let division = "world";
+    const cat = title.category || title.type || "";
+    if (cat === "Midcard") division = "midcard";
+    else if (cat === "Tag") division = "tagteam";
+
+    if (division === "tagteam" && gender === "female") {
+      return `${TITLES_REPO_URL}female-tagteam.webp`;
+    }
+
+    return `${TITLES_REPO_URL}${brand}-${gender}-${division}.webp`;
+  };
+
   const loadData = useCallback(() => {
     if (!saveId) return;
-    // IMPORTANTE: getPlannedMatchesForCurrentWeek YA DEBE VENIR ORDENADO POR sort_order
     const loadedMatches = getPlannedMatchesForCurrentWeek(saveId);
     setMatches(loadedMatches);
     setTotalShowCost(getCurrentShowCost(saveId));
@@ -88,11 +131,10 @@ export default function ShowScreen() {
     setTimeout(() => setRefreshing(false), 500);
   }, [loadData]);
 
-  // --- DRAG END HANDLER ---
   const onDragEnd = ({ data }: { data: any[] }) => {
-    setMatches(data); // Actualizamos la UI inmediatamente
+    setMatches(data);
     if (saveId) {
-      reorderMatches(saveId, data); // Guardamos el nuevo orden en DB
+      reorderMatches(saveId, data);
     }
   };
 
@@ -222,13 +264,19 @@ export default function ShowScreen() {
     return list;
   };
 
+  // --- TEAM COMPONENT ---
   const getTeamComponent = (
     team: Luchador[],
-    align: "left" | "right" | "center"
+    align: "left" | "right" | "center",
+    isCompact: boolean = false
   ) => {
-    if (!team || team.length === 0)
-      return <Text style={styles.textUnknown}>???</Text>;
+    if (!team || team.length === 0) return null;
 
+    const avatarSize = isCompact ? 60 : 80;
+    const fontSize = isCompact ? 12 : 14;
+    const boxWidth = isCompact ? 80 : 100;
+
+    // SINGLE WRESTLER
     if (team.length === 1) {
       const p = team[0];
       return (
@@ -237,42 +285,76 @@ export default function ShowScreen() {
             styles.participantBox,
             align === "right" && { alignItems: "flex-end" },
             align === "center" && { alignItems: "center" },
+            { maxWidth: boxWidth },
           ]}
         >
           {p.imageUri ? (
             <Image
-              source={{ uri: p.imageUri }}
-              style={styles.participantAvatar}
+              source={{ uri: getWrestlerImage(p.imageUri) }}
+              style={[
+                styles.participantAvatar,
+                {
+                  width: avatarSize,
+                  height: avatarSize,
+                  borderRadius: avatarSize / 2,
+                },
+              ]}
+              contentFit="cover"
+              transition={500}
             />
           ) : (
-            <View style={styles.participantAvatarPlaceholder}>
+            <View
+              style={[
+                styles.participantAvatarPlaceholder,
+                {
+                  width: avatarSize,
+                  height: avatarSize,
+                  borderRadius: avatarSize / 2,
+                },
+              ]}
+            >
               <Text style={styles.avatarInitial}>{p.name.charAt(0)}</Text>
             </View>
           )}
-          <Text style={styles.participantName} numberOfLines={1}>
+          <Text
+            style={[styles.participantName, { fontSize: fontSize }]}
+            numberOfLines={1}
+          >
             {p.name}
           </Text>
         </View>
       );
     }
+
+    // TAG TEAM
     return (
       <View
         style={[
           styles.participantBox,
           align === "right" && { alignItems: "flex-end" },
           align === "center" && { alignItems: "center" },
+          { maxWidth: 110 },
         ]}
       >
         <View style={styles.multiAvatarContainer}>
           {team.slice(0, 2).map((p, idx) => (
             <View
               key={p.id}
-              style={[styles.miniAvatar, { marginLeft: idx > 0 ? -15 : 0 }]}
+              style={[
+                styles.miniAvatar,
+                {
+                  width: isCompact ? 40 : 60,
+                  height: isCompact ? 40 : 60,
+                  marginLeft: idx > 0 ? (isCompact ? -10 : -15) : 0,
+                },
+              ]}
             >
               {p.imageUri ? (
                 <Image
-                  source={{ uri: p.imageUri }}
+                  source={{ uri: getWrestlerImage(p.imageUri) }}
                   style={{ width: "100%", height: "100%" }}
+                  contentFit="cover"
+                  transition={500}
                 />
               ) : (
                 <View style={{ backgroundColor: "#333", flex: 1 }} />
@@ -280,7 +362,10 @@ export default function ShowScreen() {
             </View>
           ))}
         </View>
-        <Text style={styles.participantName} numberOfLines={1}>
+        <Text
+          style={[styles.participantName, { fontSize: fontSize }]}
+          numberOfLines={1}
+        >
           {team.map((p) => p.name).join(" & ")}
         </Text>
       </View>
@@ -292,7 +377,7 @@ export default function ShowScreen() {
     return t ? t.name : "Championship";
   };
 
-  // --- RENDER ITEM (DRAGGABLE) ---
+  // --- RENDER ITEM ---
   const renderItem = ({
     item: match,
     drag,
@@ -302,18 +387,21 @@ export default function ShowScreen() {
     const isPromo = match.matchType.startsWith("Promo:");
     const isTitle = !!match.isTitleMatch;
 
-    let teamA = [];
-    let teamB = [];
+    let activeTeams: Luchador[][] = [];
     try {
       const pData =
         typeof match.participants === "string"
           ? JSON.parse(match.participants)
           : match.participants;
-      teamA = pData?.["0"] || [];
-      teamB = pData?.["1"] || [];
+      const allTeams = Object.values(pData) as Luchador[][];
+      activeTeams = allTeams.filter((t) => t && t.length > 0);
     } catch (e) {}
 
+    const isMultiManMatch = activeTeams.length > 2;
     let accentColor = isPromo ? "#D946EF" : isTitle ? "#F59E0B" : "#3B82F6";
+
+    // OBTENER IMAGEN DEL TÍTULO SI APLICA
+    const titleImageUri = isTitle ? getTitleImage(match.titleId) : null;
 
     return (
       <ScaleDecorator>
@@ -326,7 +414,6 @@ export default function ShowScreen() {
             isActive && { opacity: 0.8, transform: [{ scale: 1.02 }] },
           ]}
         >
-          {/* Timeline Left (With Grip) */}
           <View style={styles.timelineLeft}>
             {!isCompleted && (
               <View style={styles.gripContainer}>
@@ -345,7 +432,6 @@ export default function ShowScreen() {
             />
           </View>
 
-          {/* Card Content */}
           <BlurView
             intensity={20}
             tint="dark"
@@ -368,21 +454,36 @@ export default function ShowScreen() {
                     {isPromo ? "SEGMENT" : match.matchType.toUpperCase()}
                   </Text>
                 </View>
+
+                {/* --- SECCIÓN DE TÍTULO MEJORADA --- */}
                 {isTitle && (
                   <View
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
-                      gap: 4,
+                      gap: 6, // Un poco más de espacio
+                      paddingRight: 10,
                     }}
                   >
-                    <Ionicons name="trophy" size={12} color="#F59E0B" />
+                    {/* Imagen del título pequeña */}
+                    {titleImageUri ? (
+                      <Image
+                        source={{ uri: titleImageUri }}
+                        style={{ width: 30, height: 20 }}
+                        contentFit="contain"
+                      />
+                    ) : (
+                      <Ionicons name="trophy" size={14} color="#F59E0B" />
+                    )}
+
                     <Text
                       style={{
                         color: "#F59E0B",
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: "bold",
+                        maxWidth: 150,
                       }}
+                      numberOfLines={1}
                     >
                       {getTitleName(match.titleId)}
                     </Text>
@@ -394,11 +495,27 @@ export default function ShowScreen() {
               )}
             </View>
 
-            <View style={styles.facesRow}>
-              {getTeamComponent(teamA, teamB.length > 0 ? "left" : "center")}
-              {teamB.length > 0 && <Text style={styles.vsText}>VS</Text>}
-              {teamB.length > 0 && getTeamComponent(teamB, "right")}
-            </View>
+            {/* --- VISUALIZACIÓN LUCHADORES --- */}
+            {isMultiManMatch ? (
+              // 3-WAY / 4-WAY
+              <View style={styles.multiManRow}>
+                {activeTeams.map((team, index) => (
+                  <View key={index} style={styles.multiManItem}>
+                    {getTeamComponent(team, "center", true)}
+                    {index < activeTeams.length - 1 && (
+                      <Text style={styles.smallVsText}>vs</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            ) : (
+              // 1 VS 1 O TAG TEAM
+              <View style={styles.facesRow}>
+                {getTeamComponent(activeTeams[0] || [], "left", false)}
+                <Text style={styles.vsText}>VS</Text>
+                {getTeamComponent(activeTeams[1] || [], "right", false)}
+              </View>
+            )}
 
             {isCompleted ? (
               <View style={styles.resultBox}>
@@ -579,8 +696,10 @@ export default function ShowScreen() {
                 >
                   {p.imageUri ? (
                     <Image
-                      source={{ uri: p.imageUri }}
+                      source={{ uri: getWrestlerImage(p.imageUri) }}
                       style={styles.winnerImg}
+                      contentFit="cover"
+                      transition={500}
                     />
                   ) : (
                     <View style={styles.winnerPlaceholder}>
@@ -742,7 +861,7 @@ export default function ShowScreen() {
         </View>
       </Modal>
 
-      {/* --- COST DETAILS MODAL (NUEVO Y ARREGLADO) --- */}
+      {/* --- COST DETAILS MODAL --- */}
       <Modal
         visible={costDetailsModalVisible}
         animationType="slide"
@@ -763,8 +882,6 @@ export default function ShowScreen() {
             <ScrollView style={{ maxHeight: 400 }}>
               {matches.map((m, idx) => {
                 const isPromo = m.matchType.startsWith("Promo");
-                // Costos simulados simples basados en tus datos
-                // Stipulation cost suele venir en m.cost (en DB)
                 if (m.cost > 0) {
                   return (
                     <View key={idx} style={styles.costItem}>
@@ -832,7 +949,7 @@ const styles = StyleSheet.create({
 
   scrollContent: { padding: 20, paddingBottom: 150 },
 
-  // TIMELINE (UPDATED FOR DRAG)
+  // TIMELINE
   timelineItem: { flexDirection: "row", marginBottom: 5 },
   timelineLeft: { width: 30, alignItems: "center", justifyContent: "center" },
   gripContainer: { padding: 5 },
@@ -844,13 +961,6 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     zIndex: -1,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginTop: 20,
-    marginBottom: 5,
   },
 
   matchCard: {
@@ -870,6 +980,7 @@ const styles = StyleSheet.create({
   typeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   typeText: { fontSize: 10, fontWeight: "900" },
 
+  // --- STYLES PARA 1 VS 1 Y TAG TEAM ---
   facesRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -878,24 +989,20 @@ const styles = StyleSheet.create({
   },
   participantBox: { alignItems: "center", maxWidth: 100 },
   participantAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginBottom: 5,
+    // ESTILOS SE MANEJAN DINÁMICAMENTE EN COMPONENTE AHORA
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
+    marginBottom: 5,
   },
   participantAvatarPlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    // ESTILOS SE MANEJAN DINÁMICAMENTE EN COMPONENTE AHORA
     backgroundColor: "#333",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 5,
   },
   avatarInitial: { color: "#FFF", fontWeight: "bold" },
-  participantName: { color: "#E2E8F0", fontSize: 11, fontWeight: "700" },
+  participantName: { color: "#E2E8F0", fontWeight: "700" },
   textUnknown: {
     color: "rgba(255,255,255,0.3)",
     fontSize: 12,
@@ -905,8 +1012,6 @@ const styles = StyleSheet.create({
   },
   multiAvatarContainer: { flexDirection: "row", marginBottom: 5 },
   miniAvatar: {
-    width: 40,
-    height: 40,
     borderRadius: 20,
     overflow: "hidden",
     borderWidth: 1,
@@ -917,6 +1022,28 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontStyle: "italic",
     fontSize: 12,
+  },
+
+  // --- STYLES PARA MULTI-MAN (3-WAY, 4-WAY) ---
+  multiManRow: {
+    flexDirection: "row",
+    justifyContent: "space-between", // Usar space-between para que se distribuyan en todo el ancho
+    alignItems: "center",
+    marginBottom: 15,
+    paddingHorizontal: 10, // Un poco de padding para que no toquen los bordes
+  },
+  multiManItem: {
+    flex: 1, // Para que todos ocupen el mismo ancho
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row", // <--- AGREGAR ESTO PARA PONER EL VS AL LADO
+  },
+  smallVsText: {
+    color: "#64748B",
+    fontSize: 10,
+    fontWeight: "bold",
+    marginHorizontal: 4,
+    fontStyle: "italic",
   },
 
   // ACTIONS / RESULT
@@ -1003,7 +1130,12 @@ const styles = StyleSheet.create({
 
   // EMPTY
   emptyState: { alignItems: "center", marginTop: 100 },
-  emptyText: { color: "#FFF", fontWeight: "bold", fontSize: 18, marginTop: 10 },
+  emptyText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 18,
+    marginTop: 10,
+  },
   emptySub: { color: "#94A3B8" },
 
   // MODALS

@@ -1,5 +1,6 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -7,7 +8,6 @@ import {
   Alert,
   Dimensions,
   FlatList,
-  Image,
   Modal,
   ScrollView,
   StatusBar,
@@ -26,6 +26,13 @@ import {
   updatePlannedMatch,
 } from "../src/database/operations";
 import { Luchador } from "../src/types";
+
+// --- IMPORTAR EL HELPER ---
+import { getWrestlerImage } from "../src/utils/imageHelper";
+
+// --- URL BASE PARA TÍTULOS ---
+const TITLES_REPO_URL =
+  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/titles/";
 
 // --- CONSTANTES ---
 const INTERFERENCE_COST = 2000;
@@ -82,7 +89,13 @@ const PROMO_TYPES = [
     icon: "microphone",
     isVs: false,
   },
-  { id: "provocacion", name: "Call Out", cost: 3000, icon: "fire", isVs: true },
+  {
+    id: "provocacion",
+    name: "Call Out",
+    cost: 3000,
+    icon: "fire",
+    isVs: true,
+  },
   {
     id: "entrenamiento",
     name: "Training",
@@ -173,6 +186,44 @@ export default function PlannerScreen() {
   const [titleModalVisible, setTitleModalVisible] = useState(false);
   const [stipulationModalVisible, setStipulationModalVisible] = useState(false);
   const [activeTeamIndex, setActiveTeamIndex] = useState(0);
+
+  // --- HELPER: CONSTRUIR URL DEL TÍTULO (CORREGIDO: Devuelve undefined en lugar de null) ---
+  const getTitleImage = (title: any): string | undefined => {
+    if (!title) return undefined;
+
+    // 1. PRIORIDAD: DB
+    if (title.imageUri && title.imageUri !== "") {
+      return `${TITLES_REPO_URL}${title.imageUri}`;
+    }
+
+    // 2. FALLBACK
+    const gender = title.gender === "Female" ? "female" : "male";
+    if (
+      title.isMITB === 1 ||
+      title.name.includes("MITB") ||
+      title.name.includes("Briefcase")
+    ) {
+      return `${TITLES_REPO_URL}${gender}-moneyinthebank.png`;
+    }
+
+    let brand = "raw";
+    const nameLower = title.name.toLowerCase();
+    if (nameLower.includes("smackdown") || nameLower.includes("universal"))
+      brand = "smackdown";
+    else if (nameLower.includes("nxt")) brand = "nxt";
+    else if (nameLower.includes("aew")) brand = "aew";
+
+    let division = "world";
+    const cat = title.category || title.type || "";
+    if (cat === "Midcard") division = "midcard";
+    else if (cat === "Tag") division = "tagteam";
+
+    if (division === "tagteam" && gender === "female") {
+      return `${TITLES_REPO_URL}female-tagteam.webp`;
+    }
+
+    return `${TITLES_REPO_URL}${brand}-${gender}-${division}.webp`;
+  };
 
   useEffect(() => {
     if (!saveId) return;
@@ -368,10 +419,12 @@ export default function PlannerScreen() {
         {fighter ? (
           <>
             {fighter.imageUri ? (
+              // --- IMAGEN EN LA CARTA DEL SLOT ---
               <Image
-                source={{ uri: fighter.imageUri }}
+                source={{ uri: getWrestlerImage(fighter.imageUri) }}
                 style={styles.slotImage}
-                resizeMode="cover"
+                contentFit="cover"
+                transition={500}
               />
             ) : (
               <View style={styles.slotPlaceholder}>
@@ -495,6 +548,11 @@ export default function PlannerScreen() {
       );
     }
   };
+
+  // Variable auxiliar para evitar llamadas repetidas a getTitleImage en el render
+  const selectedTitleImage = titleInvolved
+    ? getTitleImage(titleInvolved)
+    : undefined;
 
   return (
     <View style={styles.container}>
@@ -643,9 +701,25 @@ export default function PlannerScreen() {
                     <Text style={[styles.extraTitle, { color: "#F59E0B" }]}>
                       TITLE MATCH
                     </Text>
+
+                    {/* Botón para seleccionar título */}
                     <TouchableOpacity
                       onPress={() => isTitleMatch && setTitleModalVisible(true)}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        marginTop: 5,
+                      }}
                     >
+                      {/* --- IMAGEN DEL TÍTULO SELECCIONADO (Si hay uno) --- */}
+                      {selectedTitleImage ? (
+                        <Image
+                          source={{ uri: selectedTitleImage }}
+                          style={{ width: 40, height: 25, marginRight: 8 }}
+                          contentFit="contain"
+                        />
+                      ) : null}
+
                       <Text style={styles.extraSub}>
                         {titleInvolved
                           ? titleInvolved.name
@@ -816,9 +890,12 @@ export default function PlannerScreen() {
                   onPress={() => handleSelectLuchador(item)}
                 >
                   {item.imageUri ? (
+                    // --- IMAGEN EN LA LISTA DEL MODAL ---
                     <Image
-                      source={{ uri: item.imageUri }}
+                      source={{ uri: getWrestlerImage(item.imageUri) }}
                       style={styles.rosterAvatar}
+                      contentFit="cover"
+                      transition={500}
                     />
                   ) : (
                     <View style={styles.rosterPlaceholder}>
@@ -900,7 +977,7 @@ export default function PlannerScreen() {
         </View>
       </Modal>
 
-      {/* TITLE MODAL */}
+      {/* TITLE MODAL - ACTUALIZADO CON IMÁGENES */}
       <Modal
         visible={titleModalVisible}
         animationType="slide"
@@ -928,21 +1005,35 @@ export default function PlannerScreen() {
                   No eligible vacant titles found.
                 </Text>
               }
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.rosterItem}
-                  onPress={() => {
-                    setTitleInvolved(item);
-                    setIsTitleMatch(true);
-                    setTitleModalVisible(false);
-                  }}
-                >
-                  <Text style={{ fontSize: 20 }}>🏆</Text>
-                  <Text style={[styles.rosterName, { marginLeft: 10 }]}>
-                    {item.name}
-                  </Text>
-                </TouchableOpacity>
-              )}
+              renderItem={({ item }) => {
+                // Obtenemos la imagen para la lista
+                const tImage = getTitleImage(item);
+                return (
+                  <TouchableOpacity
+                    style={styles.rosterItem}
+                    onPress={() => {
+                      setTitleInvolved(item);
+                      setIsTitleMatch(true);
+                      setTitleModalVisible(false);
+                    }}
+                  >
+                    {/* Imagen del título en la lista */}
+                    {tImage ? (
+                      <Image
+                        source={{ uri: tImage }}
+                        style={{ width: 60, height: 40 }}
+                        contentFit="contain"
+                      />
+                    ) : (
+                      <Text style={{ fontSize: 20 }}>🏆</Text>
+                    )}
+
+                    <Text style={[styles.rosterName, { marginLeft: 10 }]}>
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
             />
           </BlurView>
         </View>
@@ -960,23 +1051,192 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     padding: 20,
-    paddingTop: 10,
+    marginBottom: 10,
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: "#FFF",
-    letterSpacing: 1,
-  },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  headerTitle: { fontSize: 28, fontWeight: "900", color: "#FFF" },
+  headerSub: { color: "#94A3B8", fontWeight: "600" },
+  costBadge: {
     backgroundColor: "rgba(255,255,255,0.1)",
-    justifyContent: "center",
-    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  costLabel: { fontSize: 10, color: "#94A3B8", fontWeight: "bold" },
+  costValue: { fontSize: 14, color: "#EF4444", fontWeight: "bold" },
+
+  scrollContent: { padding: 20, paddingBottom: 150 },
+
+  // TIMELINE
+  timelineItem: { flexDirection: "row", marginBottom: 5 },
+  timelineLeft: { width: 30, alignItems: "center", justifyContent: "center" },
+  gripContainer: { padding: 5 },
+  line: {
+    width: 2,
+    flex: 1,
+    backgroundColor: "#334155",
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    zIndex: -1,
   },
 
+  matchCard: {
+    flex: 1,
+    marginBottom: 15,
+    borderRadius: 16,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    overflow: "hidden",
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  typeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  typeText: { fontSize: 10, fontWeight: "900" },
+
+  // --- STYLES PARA 1 VS 1 Y TAG TEAM ---
+  facesRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+  participantBox: { alignItems: "center", maxWidth: 100 },
+  participantAvatar: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    marginBottom: 5,
+  },
+  participantAvatarPlaceholder: {
+    backgroundColor: "#333",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  avatarInitial: { color: "#FFF", fontWeight: "bold" },
+  participantName: { color: "#E2E8F0", fontWeight: "700" },
+  textUnknown: {
+    color: "rgba(255,255,255,0.3)",
+    fontSize: 12,
+    fontWeight: "bold",
+    fontStyle: "italic",
+    textAlign: "center",
+  },
+  multiAvatarContainer: { flexDirection: "row", marginBottom: 5 },
+  miniAvatar: {
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#000",
+  },
+  vsText: {
+    color: "#64748B",
+    fontWeight: "900",
+    fontStyle: "italic",
+    fontSize: 12,
+  },
+
+  // --- STYLES PARA MULTI-MAN ---
+  multiManRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 15,
+    paddingHorizontal: 10,
+  },
+  multiManItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  smallVsText: {
+    color: "#64748B",
+    fontSize: 10,
+    fontWeight: "bold",
+    marginHorizontal: 4,
+    fontStyle: "italic",
+  },
+
+  // ACTIONS / RESULT
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.05)",
+    paddingTop: 10,
+  },
+  iconBtn: {
+    padding: 8,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 20,
+  },
+  playBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 4,
+  },
+  playBtnText: { color: "#FFF", fontWeight: "bold", fontSize: 12 },
+
+  resultBox: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.05)",
+    paddingTop: 10,
+  },
+  resultLabel: { color: "#64748B", fontSize: 10, fontWeight: "bold" },
+  resultValue: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
+  ratingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 4,
+  },
+  ratingText: { color: "#F59E0B", fontWeight: "bold" },
+
+  // FOOTER
+  footer: {
+    position: "absolute",
+    bottom: 0,
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20,
+    paddingBottom: 40,
+    backgroundColor: "#000",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  confirmBtn: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+  },
+  confirmGradient: {
+    flexDirection: "row",
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 16,
+    gap: 8,
+    alignItems: "center",
+  },
+  confirmText: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
+
+  // EXTRAS / TABS / OPTIONS
   tabContainer: {
     flexDirection: "row",
     borderRadius: 16,
@@ -1021,6 +1281,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
+  // SLOTS
   vsContainer: { flexDirection: "row", justifyContent: "space-between" },
   fighterColumn: { flex: 1, alignItems: "center" },
   columnTitle: {
@@ -1034,7 +1295,6 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "space-between",
   },
-
   slotCard: {
     height: 160,
     borderRadius: 16,
@@ -1077,7 +1337,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(239, 68, 68, 0.8)",
     borderRadius: 10,
   },
-
   vsBadge: {
     width: 30,
     height: 30,
@@ -1087,8 +1346,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 60,
   },
-  vsText: { color: "#FFF", fontWeight: "900", fontSize: 10 },
 
+  // STIPULATION BUTTON
   stipBtn: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1100,6 +1359,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
   },
+
+  // --- FALTANTES AÑADIDOS ---
   iconBox: {
     width: 36,
     height: 36,
@@ -1110,6 +1371,7 @@ const styles = StyleSheet.create({
   },
   stipLabel: { color: "#94A3B8", fontSize: 10, fontWeight: "bold" },
   stipValue: { color: "#FFF", fontSize: 14, fontWeight: "bold" },
+  // -------------------------
 
   extrasBox: {
     borderRadius: 16,
@@ -1125,37 +1387,6 @@ const styles = StyleSheet.create({
   },
   extraTitle: { fontSize: 12, fontWeight: "bold" },
   extraSub: { color: "#94A3B8", fontSize: 11 },
-
-  footer: {
-    position: "absolute",
-    bottom: 0,
-    width: "100%",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 20,
-    paddingBottom: 40,
-    backgroundColor: "#000",
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.1)",
-  },
-  costLabel: { color: "#94A3B8", fontSize: 10, fontWeight: "bold" },
-  costValue: { fontSize: 18, fontWeight: "900" },
-  confirmBtn: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-  },
-  confirmGradient: {
-    flexDirection: "row",
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 16,
-    gap: 8,
-    alignItems: "center",
-  },
-  confirmText: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
 
   // MODALS
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.8)" },
