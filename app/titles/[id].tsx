@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import { Image } from "expo-image"; // <--- 1. USAMOS EXPO IMAGE
 import { LinearGradient } from "expo-linear-gradient";
 import {
   Stack,
@@ -11,7 +12,6 @@ import { useCallback, useState } from "react";
 import {
   Dimensions,
   FlatList,
-  Image,
   Modal,
   ScrollView,
   StatusBar,
@@ -30,9 +30,14 @@ import {
   getGameState,
   getTitleHistory,
 } from "../../src/database/operations";
-import { Luchador, Title } from "../../src/types";
+import { Luchador } from "../../src/types";
+import { getWrestlerImage } from "../../src/utils/imageHelper";
 
 const { width } = Dimensions.get("window");
+
+// --- GITHUB TITLES URL ---
+const TITLES_REPO_URL =
+  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/titles/";
 
 export default function TitleDetailHistoryScreen() {
   const { id } = useLocalSearchParams();
@@ -41,7 +46,7 @@ export default function TitleDetailHistoryScreen() {
 
   // Data States
   const [history, setHistory] = useState<any[]>([]);
-  const [currentTitle, setCurrentTitle] = useState<Title | null>(null);
+  const [currentTitle, setCurrentTitle] = useState<any | null>(null); // Changed type to any to accept DB extra fields
   const [currentWeek, setCurrentWeek] = useState(1);
   const [roster, setRoster] = useState<Luchador[]>([]);
   const [allMatches, setAllMatches] = useState<any[]>([]);
@@ -58,11 +63,54 @@ export default function TitleDetailHistoryScreen() {
   const [selectedDefenses, setSelectedDefenses] = useState<any[]>([]);
   const [selectedChampName, setSelectedChampName] = useState("");
 
+  // --- HELPER: CONSTRUIR URL DEL TÍTULO (LÓGICA UNIFICADA) ---
+  const getTitleImage = (title: any) => {
+    if (!title) return null;
+
+    // 1. PRIORIDAD: Si la BD ya tiene el nombre del archivo exacto, úsalo.
+    if (title.imageUri && title.imageUri !== "") {
+      return `${TITLES_REPO_URL}${title.imageUri}`;
+    }
+
+    // 2. DETECTAR GÉNERO
+    const gender = title.gender === "Female" ? "female" : "male";
+
+    // 3. CASO ESPECIAL: MONEY IN THE BANK
+    if (
+      title.isMITB === 1 ||
+      title.name.includes("MITB") ||
+      title.name.includes("Briefcase")
+    ) {
+      return `${TITLES_REPO_URL}${gender}-moneyinthebank.png`;
+    }
+
+    // 4. LÓGICA ESTÁNDAR (FALLBACK)
+    let brand = "raw";
+    const nameLower = title.name.toLowerCase();
+
+    if (nameLower.includes("smackdown") || nameLower.includes("universal"))
+      brand = "smackdown";
+    else if (nameLower.includes("nxt")) brand = "nxt";
+    else if (nameLower.includes("aew")) brand = "aew";
+
+    let division = "world";
+    // Check both potential property names just in case
+    const cat = title.category || title.type || "";
+    if (cat === "Midcard") division = "midcard";
+    else if (cat === "Tag") division = "tagteam";
+
+    if (division === "tagteam" && gender === "female") {
+      return `${TITLES_REPO_URL}female-tagteam.webp`;
+    }
+
+    return `${TITLES_REPO_URL}${brand}-${gender}-${division}.webp`;
+  };
+
   const loadData = () => {
     if (!saveId) return;
 
-    const allTitles = getAllTitles(saveId) as Title[];
-    const title = allTitles.find((t) => t.id === Number(id)) || null;
+    const allTitles = getAllTitles(saveId);
+    const title = allTitles.find((t: any) => t.id === Number(id)) || null;
     const hist = getTitleHistory(saveId, Number(id));
     const state = getGameState(saveId) as { currentWeek: number };
     const allLuchadores = getAllLuchadores(saveId) as Luchador[];
@@ -153,16 +201,21 @@ export default function TitleDetailHistoryScreen() {
   const getGradientColors = () => {
     if (!currentTitle) return ["#333", "#000"];
     if (currentTitle.isMITB) return ["#4F46E5", "#312E81"];
+
+    // Color logic based on division/category
+    const cat = currentTitle.category || currentTitle.type;
     if (
       currentTitle.name.includes("World") ||
       currentTitle.name.includes("Universal")
     )
       return ["#B45309", "#78350F"]; // Gold
-    if (currentTitle.category === "Tag") return ["#334155", "#0F172A"]; // Slate
+    if (cat === "Tag") return ["#334155", "#0F172A"]; // Slate
+
     return ["#BE185D", "#831843"]; // Pink/Red for others
   };
 
   const titleColor = getGradientColors()[0];
+  const titleImageUri = getTitleImage(currentTitle);
 
   return (
     <View style={styles.container}>
@@ -193,21 +246,37 @@ export default function TitleDetailHistoryScreen() {
           contentContainerStyle={{ paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
         >
-          {/* HERO SECTION */}
+          {/* HERO SECTION (UPDATED) */}
           <View style={styles.heroContainer}>
-            <View
-              style={[
-                styles.iconCircle,
-                { borderColor: titleColor, backgroundColor: titleColor + "20" },
-              ]}
-            >
-              <Text style={{ fontSize: 40 }}>
-                {currentTitle?.isMITB ? "💼" : "🏆"}
-              </Text>
+            {/* Reemplazamos el círculo con ícono por la imagen real */}
+            <View style={styles.titleImageContainer}>
+              {titleImageUri ? (
+                <Image
+                  source={{ uri: titleImageUri }}
+                  style={styles.titleHeroImage}
+                  contentFit="contain"
+                  transition={500}
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.iconCircle,
+                    {
+                      borderColor: titleColor,
+                      backgroundColor: titleColor + "20",
+                    },
+                  ]}
+                >
+                  <Text style={{ fontSize: 40 }}>
+                    {currentTitle?.isMITB ? "💼" : "🏆"}
+                  </Text>
+                </View>
+              )}
             </View>
+
             <Text style={styles.titleName}>{currentTitle?.name}</Text>
             <Text style={[styles.titleCategory, { color: titleColor }]}>
-              {currentTitle?.category.toUpperCase()} DIVISION
+              {currentTitle?.category?.toUpperCase() || "CHAMPIONSHIP"} DIVISION
             </Text>
           </View>
 
@@ -234,11 +303,16 @@ export default function TitleDetailHistoryScreen() {
                 >
                   <View style={styles.avatarContainer}>
                     {luchadorImages[currentTitle.holderId1!] ? (
+                      // --- IMAGEN CAMPEÓN 1 ---
                       <Image
                         source={{
-                          uri: luchadorImages[currentTitle.holderId1!]!,
+                          uri: getWrestlerImage(
+                            luchadorImages[currentTitle.holderId1!]
+                          ),
                         }}
                         style={styles.champAvatar}
+                        contentFit="cover"
+                        transition={500}
                       />
                     ) : (
                       <View
@@ -256,11 +330,16 @@ export default function TitleDetailHistoryScreen() {
                     {currentTitle.holderId2 && (
                       <View style={styles.secondAvatar}>
                         {luchadorImages[currentTitle.holderId2] ? (
+                          // --- IMAGEN CAMPEÓN 2 (TAG) ---
                           <Image
                             source={{
-                              uri: luchadorImages[currentTitle.holderId2]!,
+                              uri: getWrestlerImage(
+                                luchadorImages[currentTitle.holderId2]
+                              ),
                             }}
                             style={styles.champAvatar}
+                            contentFit="cover"
+                            transition={500}
                           />
                         ) : (
                           <View
@@ -517,9 +596,12 @@ export default function TitleDetailHistoryScreen() {
                   }}
                 >
                   {item.imageUri ? (
+                    // --- IMAGEN LISTA MODAL ---
                     <Image
-                      source={{ uri: item.imageUri }}
+                      source={{ uri: getWrestlerImage(item.imageUri) }}
                       style={styles.itemAvatar}
+                      contentFit="cover"
+                      transition={500}
                     />
                   ) : (
                     <View style={styles.itemPlaceholder}>
@@ -655,8 +737,19 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
 
-  // HERO
+  // HERO (UPDATED FOR IMAGE)
   heroContainer: { alignItems: "center", marginBottom: 30, marginTop: 10 },
+  titleImageContainer: {
+    width: 200,
+    height: 120,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+  titleHeroImage: {
+    width: "100%",
+    height: "100%",
+  },
   iconCircle: {
     width: 80,
     height: 80,
@@ -664,7 +757,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 15,
   },
   titleName: {
     fontSize: 28,

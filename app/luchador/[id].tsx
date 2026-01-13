@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import { Image } from "expo-image"; // USAMOS EXPO IMAGE
 import { LinearGradient } from "expo-linear-gradient";
 import {
   useFocusEffect,
@@ -11,7 +12,6 @@ import { useCallback, useLayoutEffect, useState } from "react";
 import {
   Alert,
   Dimensions,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -32,7 +32,14 @@ import {
   renewContract,
 } from "../../src/database/operations";
 
+// --- IMPORTAR EL HELPER DE IMÁGENES DE LUCHADORES ---
+import { getWrestlerImage } from "../../src/utils/imageHelper";
+
 const { width } = Dimensions.get("window");
+
+// --- URL BASE PARA TÍTULOS ---
+const TITLES_REPO_URL =
+  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/titles/";
 
 export default function LuchadorDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -51,6 +58,44 @@ export default function LuchadorDetailScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
+
+  // --- HELPER PARA IMAGEN DE TÍTULO ---
+  const getTitleImage = (title: any) => {
+    if (!title) return undefined;
+
+    // 1. PRIORIDAD: DB
+    if (title.imageUri && title.imageUri !== "") {
+      return `${TITLES_REPO_URL}${title.imageUri}`;
+    }
+
+    // 2. FALLBACK
+    const gender = title.gender === "Female" ? "female" : "male";
+    if (
+      title.isMITB === 1 ||
+      title.name.includes("MITB") ||
+      title.name.includes("Briefcase")
+    ) {
+      return `${TITLES_REPO_URL}${gender}-moneyinthebank.png`;
+    }
+
+    let brand = "raw";
+    const nameLower = title.name.toLowerCase();
+    if (nameLower.includes("smackdown") || nameLower.includes("universal"))
+      brand = "smackdown";
+    else if (nameLower.includes("nxt")) brand = "nxt";
+    else if (nameLower.includes("aew")) brand = "aew";
+
+    let division = "world";
+    const cat = title.category || title.type || "";
+    if (cat === "Midcard") division = "midcard";
+    else if (cat === "Tag") division = "tagteam";
+
+    if (division === "tagteam" && gender === "female") {
+      return `${TITLES_REPO_URL}female-tagteam.webp`;
+    }
+
+    return `${TITLES_REPO_URL}${brand}-${gender}-${division}.webp`;
+  };
 
   const loadData = () => {
     if (id && saveId) {
@@ -231,9 +276,12 @@ export default function LuchadorDetailScreen() {
               />
 
               {luchador.imageUri ? (
+                // --- 4. IMAGEN PRINCIPAL OPTIMIZADA ---
                 <Image
-                  source={{ uri: luchador.imageUri }}
+                  source={{ uri: getWrestlerImage(luchador.imageUri) }}
                   style={styles.avatarImage}
+                  contentFit="cover"
+                  transition={500}
                 />
               ) : (
                 <View
@@ -284,30 +332,51 @@ export default function LuchadorDetailScreen() {
               </Text>
             </View>
 
-            {/* TÍTULOS ACTIVOS */}
+            {/* TÍTULOS ACTIVOS (AHORA CON IMÁGENES) */}
             {titles.length > 0 && (
               <View style={styles.titlesRow}>
-                {titles.map((t) => (
-                  <LinearGradient
-                    key={t.id}
-                    colors={
-                      t.isMITB ? ["#6366F1", "#4338CA"] : ["#F59E0B", "#B45309"]
-                    }
-                    style={styles.titlePill}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    <Text style={styles.titlePillIcon}>
-                      {t.isMITB ? "💼" : "🏆"}
-                    </Text>
-                    <Text style={styles.titlePillText}>{t.name}</Text>
-                  </LinearGradient>
-                ))}
+                {titles.map((t) => {
+                  const tImage = getTitleImage(t);
+                  return (
+                    <View key={t.id} style={styles.titleItem}>
+                      {tImage ? (
+                        <Image
+                          source={{ uri: tImage }}
+                          style={styles.titleImage}
+                          contentFit="contain"
+                        />
+                      ) : (
+                        // Fallback a texto si no hay imagen (por seguridad)
+                        <LinearGradient
+                          colors={
+                            t.isMITB
+                              ? ["#6366F1", "#4338CA"]
+                              : ["#F59E0B", "#B45309"]
+                          }
+                          style={styles.titlePill}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                        >
+                          <Text style={styles.titlePillIcon}>
+                            {t.isMITB ? "💼" : "🏆"}
+                          </Text>
+                          <Text style={styles.titlePillText}>{t.name}</Text>
+                        </LinearGradient>
+                      )}
+                      {/* Si usamos imagen, mostramos el nombre abajo pequeño */}
+                      {tImage && (
+                        <Text style={styles.titleLabel} numberOfLines={1}>
+                          {t.name}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             )}
           </View>
 
-          {/* --- ESTADÍSTICAS --- */}
+          {/* --- ESTADÍSTICAS (SIN POPULARIDAD) --- */}
           <BlurView intensity={20} tint="dark" style={styles.glassCard}>
             <Text style={styles.sectionTitle}>PERFORMANCE STATS</Text>
             <StatBar
@@ -323,13 +392,6 @@ export default function LuchadorDetailScreen() {
               max={5}
               color="#F59E0B"
               icon="mic"
-            />
-            <StatBar
-              label="Popularity"
-              value={luchador.popularity || 50}
-              max={100}
-              color="#8B5CF6"
-              icon="star"
             />
           </BlurView>
 
@@ -552,9 +614,12 @@ export default function LuchadorDetailScreen() {
             <View style={{ alignItems: "center", marginBottom: 20 }}>
               <View style={{ marginBottom: 10 }}>
                 {luchador.imageUri ? (
+                  // --- 5. IMAGEN EN MODAL OPTIMIZADA ---
                   <Image
-                    source={{ uri: luchador.imageUri }}
+                    source={{ uri: getWrestlerImage(luchador.imageUri) }}
                     style={{ width: 50, height: 50, borderRadius: 25 }}
+                    contentFit="cover"
+                    transition={500}
                   />
                 ) : (
                   <View
@@ -752,9 +817,26 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
-    gap: 8,
-    marginTop: 16,
+    gap: 15, // Más espacio entre títulos
+    marginTop: 20,
   },
+  titleItem: {
+    alignItems: "center",
+    width: 160,
+  },
+  titleImage: {
+    width: 80,
+    height: 60,
+    marginBottom: 5,
+  },
+  titleLabel: {
+    color: "#F59E0B",
+    fontSize: 12,
+    fontWeight: "bold",
+    textAlign: "center",
+    width: "100%",
+  },
+  // Fallback pills
   titlePill: {
     flexDirection: "row",
     paddingHorizontal: 12,

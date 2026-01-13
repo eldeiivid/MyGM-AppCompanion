@@ -1,6 +1,6 @@
 import * as SQLite from "expo-sqlite";
 
-// 1. CAMBIO DE NOMBRE DEL ARCHIVO: Para que la V2 tenga su propia base de datos limpia.
+// 1. Mantenemos el nombre de la V2
 export const db = SQLite.openDatabaseSync("mygm_evolution_v2.db");
 
 export const initDatabase = () => {
@@ -54,6 +54,7 @@ export const initDatabase = () => {
       );
     `);
 
+    // --- 🚨 CAMBIO AQUÍ: Agregamos imageUri a la definición ---
     db.execSync(`
       CREATE TABLE IF NOT EXISTS titles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,6 +66,7 @@ export const initDatabase = () => {
         holderId2 INTEGER,
         weekWon INTEGER DEFAULT 1,
         isMITB INTEGER DEFAULT 0,
+        imageUri TEXT,  -- <--- NUEVA COLUMNA
         FOREIGN KEY(save_id) REFERENCES saves(id) ON DELETE CASCADE
       );
     `);
@@ -90,29 +92,29 @@ export const initDatabase = () => {
     // 3. NUEVAS TABLAS V2: RIVALIDADES Y LOGS
     // ---------------------------------------------------------
 
-    // TABLA DE RIVALIDADES: Trackea feudos activos
+    // TABLA DE RIVALIDADES
     db.execSync(`
       CREATE TABLE IF NOT EXISTS rivalries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         save_id INTEGER NOT NULL,
         luchador_id1 INTEGER NOT NULL,
         luchador_id2 INTEGER NOT NULL,
-        level INTEGER DEFAULT 1,        -- Nivel 1, 2, 3 o 4
-        type TEXT DEFAULT '1v1',        -- '1v1', 'Tag'
-        is_active INTEGER DEFAULT 1,    -- 1: Activa, 0: Finalizada
+        level INTEGER DEFAULT 1,
+        type TEXT DEFAULT '1v1',
+        is_active INTEGER DEFAULT 1,
         created_week INTEGER,
         FOREIGN KEY(save_id) REFERENCES saves(id) ON DELETE CASCADE
       );
     `);
 
-    // TABLA DE DEFENSAS: Para el Log de campeones (Cuantas veces retuvo)
+    // TABLA DE DEFENSAS
     db.execSync(`
       CREATE TABLE IF NOT EXISTS title_defenses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         save_id INTEGER NOT NULL,
         title_id INTEGER NOT NULL,
         holder_id1 INTEGER NOT NULL,
-        holder_id2 INTEGER,              -- Para títulos Tag
+        holder_id2 INTEGER,
         week INTEGER,
         match_rating REAL,
         FOREIGN KEY(save_id) REFERENCES saves(id) ON DELETE CASCADE,
@@ -124,7 +126,6 @@ export const initDatabase = () => {
     // OTRAS TABLAS (Booking, Finanzas, Historial)
     // ---------------------------------------------------------
 
-    // *** ACTUALIZADO: Añadido sort_order ***
     db.execSync(`
       CREATE TABLE IF NOT EXISTS planned_matches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,17 +189,28 @@ export const initDatabase = () => {
       );
     `);
 
-    // --- MIGRACIONES AUTOMÁTICAS (Para bases de datos existentes) ---
-    // Intentamos agregar la columna sort_order si no existe.
+    // ---------------------------------------------------------
+    // MIGRACIONES AUTOMÁTICAS (Para bases de datos existentes)
+    // ---------------------------------------------------------
+
+    // 1. Migración para sort_order en planned_matches
     try {
       db.execSync(
         `ALTER TABLE planned_matches ADD COLUMN sort_order INTEGER DEFAULT 0;`
       );
       console.log(
-        "✅ Migración aplicada: Columna sort_order agregada a planned_matches."
+        "✅ Migración aplicada: sort_order agregada a planned_matches."
       );
     } catch (e) {
-      // Si falla, es probable que la columna ya exista, lo ignoramos.
+      // Ignorar si ya existe
+    }
+
+    // 2. 🚨 MIGRACIÓN NUEVA: imageUri en titles
+    try {
+      db.execSync(`ALTER TABLE titles ADD COLUMN imageUri TEXT;`);
+      console.log("✅ Migración aplicada: imageUri agregada a titles.");
+    } catch (e) {
+      // Ignorar si ya existe
     }
 
     console.log(

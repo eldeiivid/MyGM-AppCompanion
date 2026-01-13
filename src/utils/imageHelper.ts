@@ -2,7 +2,7 @@
 
 // Esta es la dirección directa a tus archivos en la rama 'main'
 const BASE_URL =
-  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/blob/";
+  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/";
 
 const PLACEHOLDER_URL = "https://via.placeholder.com/150/1E293B/FFFFFF?text=?";
 

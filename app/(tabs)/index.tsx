@@ -1,12 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Dimensions,
-  ImageBackground,
+  FlatList, // Importante para el carrusel
   NativeScrollEvent,
   NativeSyntheticEvent,
   RefreshControl,
@@ -33,13 +34,28 @@ import {
 } from "../../src/services/DashboardService";
 
 // Helper de imágenes
+import { getWrestlerImage } from "../../src/utils/imageHelper";
 
 const { width } = Dimensions.get("window");
 
-// --- CONFIGURACIÓN DEL CARRUSEL ---
-const CARD_WIDTH = width - 40;
-const CARD_MARGIN = 20;
-const SNAP_INTERVAL = CARD_WIDTH + CARD_MARGIN;
+// --- URL BASE PARA TÍTULOS ---
+const TITLES_REPO_URL =
+  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/titles/";
+
+// --- CONFIGURACIÓN UI ---
+const NEWS_CARD_WIDTH = width - 40;
+const NEWS_SNAP = NEWS_CARD_WIDTH + 20;
+
+// Configuración del Carrusel (Estilo Material)
+const POSTER_WIDTH = width * 0.85; // Ocupa el 85% del ancho
+const POSTER_HEIGHT = 420;
+const POSTER_SPACING = 10; // Espacio entre cartas
+// El intervalo de snap es el ancho de la carta + el margen derecho
+const SNAP_INTERVAL = POSTER_WIDTH + POSTER_SPACING;
+
+// --- GITHUB ASSETS CONFIG ---
+const GITHUB_ASSETS_URL =
+  "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/backgrounds/";
 
 export default function HomeEvolution() {
   const router = useRouter();
@@ -49,73 +65,163 @@ export default function HomeEvolution() {
   const [loading, setLoading] = useState(true);
   const [currentCash, setCurrentCash] = useState(0);
   const [expiringCount, setExpiringCount] = useState(0);
-  const [titlesMap, setTitlesMap] = useState<Record<number, string>>({});
-  const [nextMatch, setNextMatch] = useState<any>(null);
-
+  const [titlesMap, setTitlesMap] = useState<Record<number, any>>({});
+  const [featuredMatches, setFeaturedMatches] = useState<any[]>([]);
   const [activeNewsIndex, setActiveNewsIndex] = useState(0);
+
+  // --- REF PARA EL AUTO-SCROLL ---
+  const matchesListRef = useRef<FlatList>(null);
+  const [matchIndex, setMatchIndex] = useState(0);
+
+  // --- EFECTO DE AUTO-SCROLL ---
+  useEffect(() => {
+    let interval: any;
+
+    if (featuredMatches.length > 1) {
+      interval = setInterval(() => {
+        let nextIndex = matchIndex + 1;
+        if (nextIndex >= featuredMatches.length) {
+          nextIndex = 0; // Volver al inicio
+        }
+        setMatchIndex(nextIndex);
+
+        matchesListRef.current?.scrollToIndex({
+          index: nextIndex,
+          animated: true,
+          viewPosition: 0.5, // Centrar
+        });
+      }, 4000); // Cambia cada 4 segundos
+    }
+
+    return () => clearInterval(interval);
+  }, [matchIndex, featuredMatches]);
+
+  // Detectar scroll manual para pausar/actualizar el índice
+  const handleMatchScroll = (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(offsetX / SNAP_INTERVAL);
+    setMatchIndex(index);
+  };
 
   // --- LOGOUT LOGIC ---
   const handleLogout = () => {
     Alert.alert("Cerrar Sesión", "¿Volver al menú principal?", [
       { text: "Cancelar", style: "cancel" },
-      {
-        text: "Salir",
-        style: "destructive",
-        onPress: () => {
-          setSaveId(null);
-        },
-      },
+      { text: "Salir", style: "destructive", onPress: () => setSaveId(null) },
     ]);
   };
 
-  // --- 2. LÓGICA DEL BOTÓN MÁGICO (AUTO-FIX IMAGES) ---
+  // --- AUTO-FIX IMAGES ---
   const handleAutoImageUpdate = () => {
     if (!saveId) return;
     Alert.alert(
       "🪄 Auto-Conectar Imágenes",
-      "Esto actualizará la base de datos para que los nombres coincidan con GitHub (ej: 'Cody Rhodes' -> 'codyrhodes.webp'). ¿Continuar?",
+      "Esto actualizará la base de datos para que los nombres coincidan con GitHub. ¿Continuar?",
       [
         { text: "Cancelar", style: "cancel" },
         {
           text: "¡Conectar Todo!",
           onPress: () => {
             const count = autoMapRosterImages(saveId);
-            loadData(); // Recargamos para ver los cambios si aplicara
-            Alert.alert(
-              "¡Éxito!",
-              `Se actualizaron las rutas de ${count} luchadores.`
-            );
+            loadData();
+            Alert.alert("¡Éxito!", `Se actualizaron ${count} luchadores.`);
           },
         },
       ]
     );
   };
 
-  // --- HELPERS ---
-  const getVersusText = (match: any) => {
-    if (!match || !match.participants) return "Card Pending";
-    if (Array.isArray(match.participants)) {
-      return match.participants.map((p: any) => p.name).join(" vs ");
+  // --- HELPER DE TÍTULO ---
+  const getTitleImage = (titleId: number) => {
+    const title = titlesMap[titleId];
+    if (!title) return null;
+
+    if (title.imageUri && title.imageUri !== "") {
+      return `${TITLES_REPO_URL}${title.imageUri}`;
     }
-    try {
-      const parts = Object.values(match.participants).flat();
-      // @ts-ignore
-      return parts.map((p: any) => p.name).join(" vs ");
-    } catch (e) {
-      return "Tag Team Match";
+
+    const gender = title.gender === "Female" ? "female" : "male";
+    if (
+      title.isMITB === 1 ||
+      title.name.includes("MITB") ||
+      title.name.includes("Briefcase")
+    ) {
+      return `${TITLES_REPO_URL}${gender}-moneyinthebank.png`;
     }
+
+    let brand = "raw";
+    const nameLower = title.name.toLowerCase();
+
+    if (nameLower.includes("smackdown") || nameLower.includes("universal"))
+      brand = "smackdown";
+    else if (nameLower.includes("nxt")) brand = "nxt";
+    else if (nameLower.includes("aew")) brand = "aew";
+
+    let division = "world";
+    const cat = title.category || title.type || "";
+    if (cat === "Midcard") division = "midcard";
+    else if (cat === "Tag") division = "tagteam";
+
+    if (division === "tagteam" && gender === "female") {
+      return `${TITLES_REPO_URL}female-tagteam.webp`;
+    }
+
+    return `${TITLES_REPO_URL}${brand}-${gender}-${division}.webp`;
   };
 
+  // --- HELPERS ---
   const getSmartNewsText = (text: string) => {
     let finalString = text.replace(/Title\s+(\d+)/gi, (match, id) => {
       const parsedId = parseInt(id);
-      return titlesMap[parsedId] ? titlesMap[parsedId] : match;
+      return titlesMap[parsedId] ? titlesMap[parsedId].name : match;
     });
     if (finalString.includes("changed hands"))
       return finalString.replace("changed hands", "has a new champion");
     if (finalString.includes("retained"))
       return finalString.replace("retained", "retained the gold");
     return finalString;
+  };
+
+  const getParticipantsArray = (match: any) => {
+    try {
+      const p =
+        typeof match.participants === "string"
+          ? JSON.parse(match.participants)
+          : match.participants;
+      const allTeamsValues = Object.values(p);
+      const list: any[] = [];
+      allTeamsValues.forEach((team: any) => {
+        if (Array.isArray(team) && team.length > 0) {
+          list.push(...team);
+        }
+      });
+      return list;
+    } catch (error) {
+      return [];
+    }
+  };
+
+  const formatMatchNames = (participants: any[], matchType: string) => {
+    const pNames = participants.map((p) => p.name);
+
+    if (matchType.includes("Tag") && pNames.length === 4) {
+      const team1 = `${pNames[0]} & ${pNames[1]}`;
+      const team2 = `${pNames[2]} & ${pNames[3]}`;
+      return `${team1}\nVS\n${team2}`;
+    }
+    if (pNames.length === 4) {
+      return `${pNames[0]} vs ${pNames[1]}\n${pNames[2]} vs ${pNames[3]}`;
+    }
+    if (pNames.length === 3) {
+      return `${pNames[0]} vs ${pNames[1]}\nvs ${pNames[2]}`;
+    }
+    if (matchType.startsWith("Promo")) {
+      if (pNames.length === 1) return pNames[0];
+      return pNames.join(" & ");
+    }
+    return pNames.join(" vs ");
   };
 
   const loadData = async () => {
@@ -134,20 +240,52 @@ export default function HomeEvolution() {
     ).length;
 
     const titles = getAllTitles(saveId);
-    const tMap: Record<number, string> = {};
+    const tMap: Record<number, any> = {};
     titles.forEach((t: any) => {
-      tMap[t.id] = t.name;
+      tMap[t.id] = t;
     });
     setTitlesMap(tMap);
     setExpiringCount(expiring);
 
+    // --- LÓGICA DE DESTACADOS ---
     const plannedMatches = getPlannedMatchesForCurrentWeek(saveId);
-    if (plannedMatches && plannedMatches.length > 0) {
-      setNextMatch(plannedMatches[plannedMatches.length - 1]);
-    } else {
-      setNextMatch(null);
-    }
+    let highlights: any[] = [];
 
+    if (plannedMatches && plannedMatches.length > 0) {
+      plannedMatches.forEach((match, index) => {
+        let label = "";
+        let isFeatured = false;
+        let priority = 0;
+
+        if (index === plannedMatches.length - 1) {
+          label = "MAIN EVENT";
+          isFeatured = true;
+          priority = 1;
+        } else if (index === 0) {
+          label = "OPENER";
+          isFeatured = true;
+          priority = 2;
+        } else if (match.isTitleMatch === 1) {
+          label = "TITLE MATCH";
+          isFeatured = true;
+          priority = 1.5;
+        } else if (
+          match.stipulation &&
+          match.stipulation !== "Normal" &&
+          match.stipulation !== "None"
+        ) {
+          label = match.stipulation.toUpperCase();
+          isFeatured = true;
+          priority = 3;
+        }
+
+        if (isFeatured) {
+          highlights.push({ ...match, label, priority });
+        }
+      });
+      highlights.sort((a, b) => a.priority - b.priority);
+    }
+    setFeaturedMatches(highlights);
     setLoading(false);
   };
 
@@ -159,7 +297,7 @@ export default function HomeEvolution() {
 
   const handleNewsScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const scrollPosition = event.nativeEvent.contentOffset.x;
-    const index = Math.round(scrollPosition / SNAP_INTERVAL);
+    const index = Math.round(scrollPosition / NEWS_SNAP);
     setActiveNewsIndex(index);
   };
 
@@ -169,14 +307,215 @@ export default function HomeEvolution() {
     return cash.toString();
   };
 
+  // --- RENDERIZADO DE IMÁGENES ---
+  const renderFighters = (participants: any[], matchType: string) => {
+    // 0. CASO PROMO
+    if (matchType.startsWith("Promo")) {
+      if (participants.length === 1) {
+        return (
+          <Image
+            source={{ uri: getWrestlerImage(participants[0].imageUri) }}
+            style={styles.fighterPromoSingle}
+            contentFit="contain"
+          />
+        );
+      }
+      if (participants.length === 2) {
+        return (
+          <>
+            <Image
+              source={{ uri: getWrestlerImage(participants[0].imageUri) }}
+              style={styles.fighter1v1Left}
+              contentFit="contain"
+            />
+            <Image
+              source={{ uri: getWrestlerImage(participants[1].imageUri) }}
+              style={styles.fighter1v1Right}
+              contentFit="contain"
+            />
+          </>
+        );
+      }
+    }
+
+    // 1. CASO 1 VS 1
+    if (participants.length === 2) {
+      return (
+        <>
+          <Image
+            source={{ uri: getWrestlerImage(participants[0].imageUri) }}
+            style={styles.fighter1v1Left}
+            contentFit="contain"
+          />
+          <Image
+            source={{ uri: getWrestlerImage(participants[1].imageUri) }}
+            style={styles.fighter1v1Right}
+            contentFit="contain"
+          />
+        </>
+      );
+    }
+
+    // 2. CASO TAG TEAM
+    if (matchType.includes("Tag") && participants.length === 4) {
+      return (
+        <>
+          <Image
+            source={{ uri: getWrestlerImage(participants[1].imageUri) }}
+            style={[
+              styles.fighterTag,
+              {
+                left: -30,
+                zIndex: 1,
+                opacity: 0.7,
+                transform: [{ scale: 0.85 }],
+              },
+            ]}
+            contentFit="contain"
+          />
+          <Image
+            source={{ uri: getWrestlerImage(participants[0].imageUri) }}
+            style={[styles.fighterTag, { left: 15, zIndex: 2 }]}
+            contentFit="contain"
+          />
+
+          <Image
+            source={{ uri: getWrestlerImage(participants[3].imageUri) }}
+            style={[
+              styles.fighterTag,
+              {
+                right: -30,
+                zIndex: 1,
+                opacity: 0.7,
+                transform: [{ scale: 0.85 }],
+              },
+            ]}
+            contentFit="contain"
+          />
+          <Image
+            source={{ uri: getWrestlerImage(participants[2].imageUri) }}
+            style={[styles.fighterTag, { right: 15, zIndex: 2 }]}
+            contentFit="contain"
+          />
+        </>
+      );
+    }
+
+    // 3. CASO MULTI-MAN
+    if (participants.length > 2) {
+      return (
+        <View style={styles.multiManContainer}>
+          {participants.map((p: any, i: number) => (
+            <Image
+              key={i}
+              source={{ uri: getWrestlerImage(p.imageUri) }}
+              style={[
+                styles.fighterMultiStrip,
+                { marginLeft: i === 0 ? 0 : -55, zIndex: i },
+              ]}
+              contentFit="contain"
+            />
+          ))}
+        </View>
+      );
+    }
+
+    return null;
+  };
+
+  // --- RENDER DE CADA TARJETA DEL CARRUSEL ---
+  const renderPosterCardItem = ({ item: match, index }: any) => {
+    const participants = getParticipantsArray(match);
+    const isCrowded = participants.length > 2;
+    const dynamicFontSize = isCrowded ? 16 : 22;
+    const dynamicLineHeight = isCrowded ? 20 : 26;
+
+    let cardColor = brandTheme || "#333";
+    if (match.label === "MAIN EVENT") cardColor = "#EF4444";
+    else if (match.isTitleMatch) cardColor = "#F59E0B";
+    else if (match.label === "OPENER") cardColor = "#3B82F6";
+
+    const brandName = data?.brandName ? data.brandName.toLowerCase() : "raw";
+    const bgImageUri = `${GITHUB_ASSETS_URL}${brandName}-background.jpg`;
+
+    const isPromo = match.matchType.startsWith("Promo");
+
+    // OBTENER IMAGEN DEL TÍTULO
+    const titleImageUri = match.isTitleMatch
+      ? getTitleImage(match.titleId)
+      : null;
+
+    return (
+      <TouchableOpacity
+        key={match.id}
+        activeOpacity={0.9}
+        onPress={() => router.push("/show")}
+        style={[styles.posterCard, { marginRight: POSTER_SPACING }]}
+      >
+        <Image
+          source={{ uri: bgImageUri }}
+          style={StyleSheet.absoluteFillObject}
+          contentFit="cover"
+          placeholder={{ blurhash: "L02?IVof00ay_Nof00ay00ay~qj[" }}
+          transition={500}
+        />
+
+        <LinearGradient
+          colors={[cardColor, "rgba(0,0,0,0.6)", "black"]}
+          locations={[0, 0.4, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[StyleSheet.absoluteFillObject, { opacity: 0.85 }]}
+        />
+
+        {/* TÍTULO */}
+        {match.isTitleMatch && titleImageUri ? (
+          <Image
+            source={{ uri: titleImageUri }}
+            style={styles.posterTitleImage}
+            contentFit="contain"
+          />
+        ) : null}
+
+        {/* VS */}
+        {!isPromo && <Text style={styles.posterVsBg}>VS</Text>}
+
+        <View style={styles.posterFightersContainer}>
+          {renderFighters(participants, match.matchType)}
+        </View>
+
+        <BlurView intensity={30} tint="dark" style={styles.posterInfoBlur}>
+          <View style={[styles.posterBadge, { backgroundColor: cardColor }]}>
+            <Text style={styles.posterBadgeText}>{match.label}</Text>
+          </View>
+
+          <Text
+            style={[
+              styles.posterNames,
+              { fontSize: dynamicFontSize, lineHeight: dynamicLineHeight },
+            ]}
+            numberOfLines={4}
+            adjustsFontSizeToFit={false}
+          >
+            {formatMatchNames(participants, match.matchType)}
+          </Text>
+
+          <Text style={styles.posterMeta}>
+            {isPromo ? "SEGMENT" : match.matchType}
+          </Text>
+        </BlurView>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
       <View style={[styles.absoluteFill, { backgroundColor: "#000" }]} />
       <LinearGradient
-        colors={[brandTheme || "#EF4444", "rgba(0,0,0,0.5)", "transparent"]}
-        style={[styles.absoluteFill, { height: "45%", opacity: 0.4 }]}
+        colors={[brandTheme || "#EF4444", "black"]}
+        style={[styles.absoluteFill, { height: "60%", opacity: 0.2 }]}
       />
 
       <ScrollView
@@ -190,46 +529,31 @@ export default function HomeEvolution() {
           />
         }
       >
-        {/* HEADER */}
         <View style={styles.header}>
-          {/* Botón Logout */}
           <TouchableOpacity onPress={handleLogout} style={styles.iconBtn}>
             <Ionicons name="log-out-outline" size={22} color="#CBD5E1" />
           </TouchableOpacity>
-
           <View style={{ alignItems: "center" }}>
             <Text style={styles.greetingLabel}>GM OFFICE</Text>
             <Text style={styles.brandName}>
               {data?.brandName?.toUpperCase() || "WWE"}
             </Text>
           </View>
-
           <View style={{ flexDirection: "row", gap: 10 }}>
-            {/* 3. BOTÓN MÁGICO (FIX IMAGES) */}
             <TouchableOpacity
               onPress={handleAutoImageUpdate}
               style={[
                 styles.iconBtn,
-                {
-                  backgroundColor: "rgba(59, 130, 246, 0.2)",
-                  borderColor: "#3B82F6",
-                  borderWidth: 1,
-                },
+                { borderColor: "#3B82F6", borderWidth: 1 },
               ]}
             >
               <Ionicons name="color-wand" size={20} color="#3B82F6" />
             </TouchableOpacity>
-
-            {/* Botón Historial */}
             <TouchableOpacity
               onPress={() => router.push("../history")}
               style={[
                 styles.iconBtn,
-                {
-                  borderColor: brandTheme,
-                  borderWidth: 1,
-                  backgroundColor: brandTheme + "20",
-                },
+                { borderColor: brandTheme, borderWidth: 1 },
               ]}
             >
               <Ionicons
@@ -241,14 +565,13 @@ export default function HomeEvolution() {
           </View>
         </View>
 
-        {/* NEWS TICKER */}
+        {/* --- 1. NEWS REPORT --- */}
         <View style={styles.newsSection}>
-          <Text style={styles.sectionTitle}>Previous Week Report</Text>
-
+          <Text style={styles.sectionTitle}>Week Report</Text>
           <ScrollView
             horizontal
             pagingEnabled={false}
-            snapToInterval={SNAP_INTERVAL}
+            snapToInterval={NEWS_SNAP}
             decelerationRate="fast"
             showsHorizontalScrollIndicator={false}
             onScroll={handleNewsScroll}
@@ -265,7 +588,7 @@ export default function HomeEvolution() {
                 return (
                   <View
                     key={index}
-                    style={{ width: CARD_WIDTH, marginRight: CARD_MARGIN }}
+                    style={{ width: NEWS_CARD_WIDTH, marginRight: 20 }}
                   >
                     <BlurView
                       intensity={25}
@@ -307,7 +630,7 @@ export default function HomeEvolution() {
                 );
               })
             ) : (
-              <View style={{ width: CARD_WIDTH, marginRight: CARD_MARGIN }}>
+              <View style={{ width: NEWS_CARD_WIDTH, marginRight: 20 }}>
                 <BlurView intensity={15} tint="dark" style={styles.newsCard}>
                   <Text style={styles.newsSubtext}>
                     No major news reported yet.
@@ -316,8 +639,6 @@ export default function HomeEvolution() {
               </View>
             )}
           </ScrollView>
-
-          {/* INDICATORS */}
           {data?.news && data.news.length > 1 && (
             <View style={styles.paginationContainer}>
               {data.news.map((_, i) => (
@@ -339,16 +660,15 @@ export default function HomeEvolution() {
           )}
         </View>
 
-        {/* BENTO GRID */}
+        {/* --- 2. BENTO STATS --- */}
         <View style={styles.bentoGrid}>
           <BlurView intensity={25} tint="light" style={styles.glassCardSmall}>
             <View style={styles.iconBox}>
               <Ionicons name="calendar" size={16} color="#FBBF24" />
             </View>
-            <Text style={styles.cardTag}>CURRENT WEEK</Text>
+            <Text style={styles.cardTag}>WEEK</Text>
             <Text style={styles.cardValue}>{data?.currentWeek || 1} / 52</Text>
           </BlurView>
-
           <BlurView intensity={25} tint="light" style={styles.glassCardSmall}>
             <View style={styles.iconBox}>
               <Ionicons name="cash" size={16} color="#4ADE80" />
@@ -358,7 +678,7 @@ export default function HomeEvolution() {
           </BlurView>
         </View>
 
-        {/* ALERTS */}
+        {/* --- ALERTS --- */}
         {expiringCount > 0 ? (
           <BlurView intensity={40} tint="dark" style={styles.alertCard}>
             <View style={styles.alertHeader}>
@@ -385,80 +705,77 @@ export default function HomeEvolution() {
           </BlurView>
         )}
 
-        {/* TONIGHT'S PREVIEW */}
-        <Text style={styles.sectionTitle}>Tonight's Main Event</Text>
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => router.push("/show")}
-          style={styles.mainEventContainer}
-        >
-          <ImageBackground
-            source={{
-              // Usamos el helper también aquí por si acaso
-              uri: nextMatch
-                ? "https://images.unsplash.com/photo-1514525253440-b393452e8d26?q=80&w=1000"
-                : "https://images.unsplash.com/photo-1555597673-b21d5c935865?q=80&w=1000",
+        {/* --- 3. TONIGHT'S CARD (CARRUSEL MEJORADO CON FLATLIST) --- */}
+        <View style={{ marginBottom: 35 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 15,
             }}
-            style={styles.eventImg}
-            imageStyle={{ borderRadius: 28 }}
           >
-            <LinearGradient
-              colors={["transparent", "rgba(0,0,0,0.6)", "rgba(0,0,0,0.95)"]}
-              style={styles.eventOverlay}
-            >
-              {nextMatch ? (
-                <>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                      marginBottom: 4,
-                    }}
-                  >
-                    <Text style={styles.eventBadge}>MAIN EVENT</Text>
-                    {nextMatch.isTitleMatch === 1 && (
-                      <View
-                        style={{
-                          backgroundColor: "#F59E0B",
-                          borderRadius: 4,
-                          paddingHorizontal: 4,
-                          paddingVertical: 1,
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 8,
-                            fontWeight: "900",
-                            color: "black",
-                          }}
-                        >
-                          TITLE
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.eventMatch} numberOfLines={2}>
-                    {getVersusText(nextMatch)}
-                  </Text>
-                  <Text style={styles.eventSub}>
-                    {nextMatch.matchType} • {nextMatch.stipulation || "Normal"}
-                  </Text>
-                </>
-              ) : (
-                <>
-                  <Text style={[styles.eventBadge, { color: "#94A3B8" }]}>
-                    NEXT SHOW
-                  </Text>
-                  <Text style={styles.eventMatch}>Card Empty</Text>
-                  <Text style={styles.eventSub}>
-                    Tap to start booking Week {data?.currentWeek}
-                  </Text>
-                </>
-              )}
-            </LinearGradient>
-          </ImageBackground>
-        </TouchableOpacity>
+            <Text style={styles.sectionTitle}>Tonight's Card</Text>
+            {featuredMatches.length > 0 && (
+              <Text
+                style={{ color: "#64748B", fontSize: 12, fontWeight: "bold" }}
+              >
+                {featuredMatches.length} KEY MATCHES
+              </Text>
+            )}
+          </View>
+
+          {featuredMatches.length > 0 ? (
+            <FlatList
+              ref={matchesListRef}
+              data={featuredMatches}
+              keyExtractor={(item) => item.id.toString()}
+              renderItem={renderPosterCardItem}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={SNAP_INTERVAL}
+              decelerationRate="fast"
+              snapToAlignment="start"
+              // Padding interno para que el carrusel no toque el borde izquierdo de la pantalla
+              contentContainerStyle={{ paddingLeft: 0, paddingRight: 20 }}
+              // Detectar scroll manual
+              onMomentumScrollEnd={handleMatchScroll}
+              // Propiedades de optimización
+              getItemLayout={(data, index) => ({
+                length: SNAP_INTERVAL,
+                offset: SNAP_INTERVAL * index,
+                index,
+              })}
+            />
+          ) : (
+            <TouchableOpacity onPress={() => router.push("/planner")}>
+              <BlurView
+                intensity={15}
+                tint="dark"
+                style={[styles.emptyPoster, { borderColor: brandTheme }]}
+              >
+                <Ionicons
+                  name="add-circle-outline"
+                  size={50}
+                  color={brandTheme}
+                />
+                <Text
+                  style={{
+                    color: "white",
+                    fontWeight: "bold",
+                    marginTop: 10,
+                    fontSize: 16,
+                  }}
+                >
+                  Build The Card
+                </Text>
+                <Text style={{ color: "#94A3B8", fontSize: 12 }}>
+                  Week {data?.currentWeek}
+                </Text>
+              </BlurView>
+            </TouchableOpacity>
+          )}
+        </View>
       </ScrollView>
     </View>
   );
@@ -467,17 +784,12 @@ export default function HomeEvolution() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
-  scrollContent: {
-    padding: 20,
-    paddingTop: 0,
-    paddingBottom: 150,
-    marginTop: 0,
-  },
+  scrollContent: { padding: 20, paddingTop: 0, paddingBottom: 150 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 30,
+    marginBottom: 20,
     marginTop: 60,
   },
   iconBtn: {
@@ -501,16 +813,161 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     textAlign: "center",
   },
+  sectionTitle: {
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
 
+  // --- POSTER STYLES (NUEVO CARRUSEL) ---
+  posterCard: {
+    width: POSTER_WIDTH, // Ancho fijo para snapping correcto
+    height: POSTER_HEIGHT,
+    borderRadius: 24, // Bordes más suaves
+    overflow: "hidden",
+    backgroundColor: "#222",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  emptyPoster: {
+    width: "100%",
+    height: 150,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  posterVsBg: {
+    position: "absolute",
+    top: "20%",
+    width: "100%",
+    textAlign: "center",
+    fontSize: 120,
+    fontWeight: "900",
+    color: "rgba(255,255,255,0.05)",
+    zIndex: 0,
+  },
+
+  posterFightersContainer: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    zIndex: 1,
+    overflow: "hidden",
+  },
+
+  // Estilos de Imagenes 1v1
+  fighter1v1Left: {
+    width: "55%",
+    height: "75%",
+    position: "absolute",
+    bottom: 0,
+    left: -40,
+    zIndex: 2,
+  },
+  fighter1v1Right: {
+    width: "55%",
+    height: "75%",
+    position: "absolute",
+    bottom: 0,
+    right: -40,
+    zIndex: 1,
+  },
+
+  // Estilo Promo Solo
+  fighterPromoSingle: {
+    width: "80%", // Mas ancho para que se vea bien solo
+    height: "85%",
+    position: "absolute",
+    bottom: 0,
+    zIndex: 2,
+  },
+
+  // Estilos Tag Team (Más chicos)
+  fighterTag: { width: "55%", height: "70%", position: "absolute", bottom: 0 },
+
+  // Estilos Multi-Man (Tira de imágenes pegadas)
+  multiManContainer: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    height: "100%",
+    width: "100%",
+    justifyContent: "center",
+    paddingBottom: 0,
+  },
+  fighterMultiStrip: {
+    width: "45%", // Ancho para que 4 ocupen el espacio solapados
+    height: "75%",
+    bottom: 0,
+  },
+
+  posterInfoBlur: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 15,
+    paddingBottom: 25,
+    zIndex: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  posterBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: "flex-start",
+    marginBottom: 6,
+  },
+  posterBadgeText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+
+  // IMAGEN DEL TÍTULO EN POSTER
+  posterTitleImage: {
+    position: "absolute",
+    top: 15,
+    alignSelf: "center",
+    width: 80,
+    height: 60,
+    zIndex: 20,
+  },
+
+  // TEXTO CENTRADO (BASE)
+  posterNames: {
+    color: "white",
+    fontWeight: "900",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    textAlign: "center",
+  },
+  posterMeta: {
+    color: "#CBD5E1",
+    fontSize: 11,
+    marginTop: 4,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+
+  // BENTO GRID
   bentoGrid: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 35,
   },
   glassCardSmall: {
     width: (width - 55) / 2,
     padding: 20,
-    borderRadius: 28,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
     overflow: "hidden",
@@ -534,7 +991,7 @@ const styles = StyleSheet.create({
 
   alertCard: {
     padding: 20,
-    borderRadius: 28,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.05)",
     marginBottom: 35,
@@ -550,39 +1007,13 @@ const styles = StyleSheet.create({
   alertBody: { color: "#94A3B8", fontSize: 14, lineHeight: 20 },
   highlight: { color: "#FFF", fontWeight: "800" },
 
-  sectionTitle: {
-    color: "#FFF",
-    fontSize: 20,
-    fontWeight: "900",
-    marginBottom: 15,
-  },
-
-  mainEventContainer: {
-    height: 200,
-    borderRadius: 28,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-  },
-  eventImg: { flex: 1, justifyContent: "flex-end" },
-  eventOverlay: { padding: 20, paddingTop: 60 },
-  eventBadge: {
-    color: "#EF4444",
-    fontWeight: "900",
-    fontSize: 10,
-    letterSpacing: 2,
-    marginBottom: 4,
-  },
-  eventMatch: { color: "#FFF", fontSize: 24, fontWeight: "900" },
-  eventSub: { color: "#94A3B8", fontSize: 12, fontWeight: "600" },
-
-  newsSection: { marginBottom: 30 },
+  newsSection: { marginBottom: 35 },
   newsCard: {
     padding: 20,
-    borderRadius: 28,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
-    height: 140,
+    height: 130,
     overflow: "hidden",
     justifyContent: "center",
   },
@@ -591,14 +1022,13 @@ const styles = StyleSheet.create({
   newsBadge: { fontSize: 10, fontWeight: "900", letterSpacing: 1 },
   newsTitle: {
     color: "#FFF",
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "900",
     marginBottom: 4,
   },
   newsSubtext: { color: "#94A3B8", fontSize: 13, lineHeight: 18 },
   newsBgIcon: { position: "absolute", right: -10, bottom: -10 },
 
-  // Pagination Styles
   paginationContainer: {
     flexDirection: "row",
     justifyContent: "center",
@@ -606,8 +1036,5 @@ const styles = StyleSheet.create({
     marginTop: 10,
     gap: 6,
   },
-  paginationDot: {
-    height: 6,
-    borderRadius: 3,
-  },
+  paginationDot: { height: 6, borderRadius: 3 },
 });

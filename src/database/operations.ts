@@ -17,6 +17,16 @@ export const getGameState = (saveId: number) => {
   }
 };
 
+export const deleteSave = (saveId: number) => {
+  try {
+    // Al borrar el save, el CASCADE de SQL borrará todo lo demás (luchadores, matches, etc.)
+    db.runSync("DELETE FROM saves WHERE id = ?", [saveId]);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
 export const updateCash = (
   saveId: number,
   amount: number,
@@ -978,6 +988,10 @@ export const getAllSaves = () => {
 // 11. GESTIÓN DE SAVES Y TÍTULOS POR MARCA
 // ==========================================
 
+// ==========================================
+// 11. GESTIÓN DE SAVES Y TÍTULOS POR MARCA
+// ==========================================
+
 export const createNewSave = (
   name: string,
   brand: string,
@@ -985,7 +999,7 @@ export const createNewSave = (
   theme: string
 ) => {
   try {
-    // 1. Crear la partida
+    // 1. Create Save
     const result = db.runSync(
       `INSERT INTO saves (name, brand, themeColor, currentCash, currentWeek, created_at) 
        VALUES (?, ?, ?, ?, 1, ?)`,
@@ -994,125 +1008,205 @@ export const createNewSave = (
 
     const newSaveId = result.lastInsertRowId;
 
-    // 2. Definir Títulos Específicos por Marca
+    // 2. Define Brand Titles with specific Image URIs
     let brandTitles: any[] = [];
     const normalizedBrand = brand.toLowerCase().trim();
 
     if (normalizedBrand === "raw") {
       brandTitles = [
-        { name: "World Heavyweight Champ", category: "World", gender: "Male" },
-        { name: "Women's World Champ", category: "World", gender: "Female" },
-        { name: "Intercontinental Champ", category: "Midcard", gender: "Male" },
+        {
+          name: "World Heavyweight Champ",
+          category: "World",
+          gender: "Male",
+          imageUri: "raw-male-world.webp",
+        },
+        {
+          name: "Women's World Champ",
+          category: "World",
+          gender: "Female",
+          imageUri: "raw-female-world.webp",
+        },
+        {
+          name: "Intercontinental Champ",
+          category: "Midcard",
+          gender: "Male",
+          imageUri: "raw-male-midcard.webp",
+        },
         {
           name: "Women's Intercontinental",
           category: "Midcard",
           gender: "Female",
+          imageUri: "raw-female-midcard.webp", // Ensure this exists or use fallback
         },
-        { name: "World Tag Team Champs", category: "Tag", gender: "Male" },
-        { name: "WWE Women's Tag Team", category: "Tag", gender: "Female" },
-        // Extras mecánicos
+        {
+          name: "World Tag Team Champs",
+          category: "Tag",
+          gender: "Male",
+          imageUri: "raw-male-tagteam.webp",
+        },
+        {
+          name: "WWE Women's Tag Team",
+          category: "Tag",
+          gender: "Female",
+          imageUri: "female-tagteam.webp", // Shared title
+        },
+        // MITB
         {
           name: "Mr. MITB (RAW)",
           category: "Other",
           gender: "Male",
           isMITB: 1,
+          imageUri: "male-moneyinthebank.png",
         },
         {
           name: "Miss MITB (RAW)",
           category: "Other",
           gender: "Female",
           isMITB: 1,
+          imageUri: "female-moneyinthebank.png",
         },
       ];
     } else if (normalizedBrand === "smackdown") {
       brandTitles = [
-        { name: "Undisputed WWE Champ", category: "World", gender: "Male" },
-        { name: "WWE Women’s Champ", category: "World", gender: "Female" },
-        { name: "United States Champ", category: "Midcard", gender: "Male" },
+        {
+          name: "Undisputed WWE Champ",
+          category: "World",
+          gender: "Male",
+          imageUri: "smackdown-male-world.webp",
+        },
+        {
+          name: "WWE Women’s Champ",
+          category: "World",
+          gender: "Female",
+          imageUri: "smackdown-female-world.webp",
+        },
+        {
+          name: "United States Champ",
+          category: "Midcard",
+          gender: "Male",
+          imageUri: "smackdown-male-midcard.webp",
+        },
         {
           name: "Women's United States",
           category: "Midcard",
           gender: "Female",
+          imageUri: "smackdown-female-midcard.webp",
         },
-        { name: "WWE Tag Team Champs", category: "Tag", gender: "Male" },
-        { name: "WWE Women's Tag Team", category: "Tag", gender: "Female" },
-        // Extras mecánicos
-        { name: "Mr. MITB (SD)", category: "Other", gender: "Male", isMITB: 1 },
+        {
+          name: "WWE Tag Team Champs",
+          category: "Tag",
+          gender: "Male",
+          imageUri: "smackdown-male-tagteam.webp",
+        },
+        {
+          name: "WWE Women's Tag Team",
+          category: "Tag",
+          gender: "Female",
+          imageUri: "female-tagteam.webp",
+        },
+        // MITB
+        {
+          name: "Mr. MITB (SD)",
+          category: "Other",
+          gender: "Male",
+          isMITB: 1,
+          imageUri: "male-moneyinthebank.png",
+        },
         {
           name: "Miss MITB (SD)",
           category: "Other",
           gender: "Female",
           isMITB: 1,
+          imageUri: "female-moneyinthebank.png",
         },
       ];
     } else if (normalizedBrand === "nxt") {
       brandTitles = [
-        { name: "NXT Championship", category: "World", gender: "Male" },
-        { name: "NXT Women's Champ", category: "World", gender: "Female" },
-        { name: "NXT North American", category: "Midcard", gender: "Male" },
+        {
+          name: "NXT Championship",
+          category: "World",
+          gender: "Male",
+          imageUri: "nxt-male-world.webp",
+        },
+        {
+          name: "NXT Women's Champ",
+          category: "World",
+          gender: "Female",
+          imageUri: "nxt-female-world.webp",
+        },
+        {
+          name: "NXT North American",
+          category: "Midcard",
+          gender: "Male",
+          imageUri: "nxt-male-midcard.webp",
+        },
         {
           name: "Women’s North American",
           category: "Midcard",
           gender: "Female",
+          imageUri: "nxt-female-midcard.webp",
         },
-        { name: "NXT Tag Team Champs", category: "Tag", gender: "Male" },
-        // NXT suele tener torneos, pero añadimos MITB por jugabilidad
-        { name: "NXT Briefcase", category: "Other", gender: "Male", isMITB: 1 },
-      ];
-    } else if (normalizedBrand === "ecw") {
-      brandTitles = [
-        { name: "ECW World Heavyweight", category: "World", gender: "Male" },
-        { name: "ECW Television Champ", category: "Midcard", gender: "Male" },
-        { name: "ECW Tag Team Champs", category: "Tag", gender: "Male" },
-        // ECW no tenía división femenina fuerte ni MITB, lo dejamos purista
-      ];
-    } else if (normalizedBrand === "wcw") {
-      brandTitles = [
-        { name: "WCW World Heavyweight", category: "World", gender: "Male" },
-        { name: "WCW Women's Champ", category: "World", gender: "Female" },
-        { name: "WCW Hardcore Champ", category: "Midcard", gender: "Male" }, // O US Title
-        { name: "WCW Tag Team Champs", category: "Tag", gender: "Male" },
+        {
+          name: "NXT Tag Team Champs",
+          category: "Tag",
+          gender: "Male",
+          imageUri: "nxt-male-tagteam.webp",
+        },
       ];
     } else {
-      // FALLBACK GENÉRICO (Por si creas una marca personalizada en el futuro)
+      // FALLBACK GENERICS
+      // Assumes files like 'brand-gender-division.webp' exist based on the custom brand name
       brandTitles = [
-        { name: `${brand} World Champ`, category: "World", gender: "Male" },
-        { name: `${brand} Midcard Champ`, category: "Midcard", gender: "Male" },
-        { name: `${brand} Tag Team Champs`, category: "Tag", gender: "Male" },
-        { name: `${brand} Womens Champ`, category: "World", gender: "Female" },
+        {
+          name: `${brand} World Champ`,
+          category: "World",
+          gender: "Male",
+          imageUri: `${normalizedBrand}-male-world.webp`,
+        },
+        {
+          name: `${brand} Midcard Champ`,
+          category: "Midcard",
+          gender: "Male",
+          imageUri: `${normalizedBrand}-male-midcard.webp`,
+        },
+        {
+          name: `${brand} Tag Team Champs`,
+          category: "Tag",
+          gender: "Male",
+          imageUri: `${normalizedBrand}-male-tagteam.webp`,
+        },
+        {
+          name: `${brand} Womens Champ`,
+          category: "World",
+          gender: "Female",
+          imageUri: `${normalizedBrand}-female-world.webp`,
+        },
       ];
     }
 
-    // 3. Insertar los títulos en la DB
+    // 3. Insert Titles into DB with imageUri
     brandTitles.forEach((t) => {
       db.runSync(
-        `INSERT INTO titles (save_id, name, category, gender, isMITB, holderId1, holderId2, weekWon) 
-         VALUES (?, ?, ?, ?, ?, NULL, NULL, 1)`,
+        `INSERT INTO titles (save_id, name, category, gender, isMITB, imageUri, holderId1, holderId2, weekWon) 
+         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1)`,
         [
           newSaveId,
           t.name,
           t.category,
           t.gender,
-          t.isMITB ? 1 : 0, // Si no se define, es 0
+          t.isMITB ? 1 : 0,
+          t.imageUri, // <--- Saving the specific image file name
         ]
       );
     });
 
-    console.log(`✅ Partida '${name}' (${brand}) creada con ID: ${newSaveId}.`);
+    console.log(
+      `✅ Save '${name}' (${brand}) created with ID: ${newSaveId}. Titles mapped.`
+    );
     return newSaveId;
   } catch (e) {
-    console.error("❌ Error creando partida:", e);
+    console.error("❌ Error creating save:", e);
     return null;
-  }
-};
-
-export const deleteSave = (saveId: number) => {
-  try {
-    // Al borrar el save, el CASCADE de SQL borrará todo lo demás (luchadores, matches, etc.)
-    db.runSync("DELETE FROM saves WHERE id = ?", [saveId]);
-    return true;
-  } catch (e) {
-    return false;
   }
 };
 
@@ -1388,6 +1482,96 @@ export const autoMapRosterImages = (saveId: number) => {
     return updatedCount;
   } catch (e) {
     console.error("❌ Error en auto-mapeo:", e);
+    return 0;
+  }
+};
+
+// ==========================================
+// 🛠️ UTILIDAD: AUTO-MAPEO DE IMÁGENES (VERSIÓN CORREGIDA)
+// ==========================================
+export const autoMapTitleImages = (saveId: number) => {
+  try {
+    // 1. OBTENER INFORMACIÓN DEL SAVE (Para saber la marca de la partida)
+    const saveInfo: any = db.getFirstSync(
+      "SELECT brand FROM saves WHERE id = ?",
+      [saveId]
+    );
+
+    // Normalizamos la marca (ej: 'SmackDown' -> 'smackdown')
+    // Si por error no hay marca, usamos 'raw' por defecto.
+    const currentSaveBrand = saveInfo?.brand?.toLowerCase().trim() || "raw";
+
+    // 2. Obtener todos los títulos
+    const titles = db.getAllSync(`SELECT * FROM titles WHERE save_id = ?`, [
+      saveId,
+    ]);
+    let updatedCount = 0;
+
+    titles.forEach((t: any) => {
+      const nameLower = t.name.toLowerCase();
+
+      // --- A. DETECTAR BRAND ---
+      // Lógica: Por defecto usamos la marca de la partida.
+      let brand = currentSaveBrand;
+
+      // EXCEPCIÓN: Si el título tiene explícitamente el nombre de OTRA marca, respetamos eso.
+      // (Ejemplo: Si en un save de Raw tienes el título de NXT).
+      if (nameLower.includes("nxt")) brand = "nxt";
+      else if (nameLower.includes("ecw")) brand = "ecw";
+      else if (nameLower.includes("wcw")) brand = "wcw";
+      else if (nameLower.includes("aew")) brand = "aew";
+      // Si dice 'smackdown' o 'universal', forzamos smackdown
+      else if (
+        nameLower.includes("smackdown") ||
+        nameLower.includes("universal")
+      )
+        brand = "smackdown";
+      // Si dice 'raw', forzamos raw
+      else if (nameLower.includes("raw")) brand = "raw";
+
+      // --- B. DETECTAR GÉNERO ---
+      const gender = t.gender === "Female" ? "female" : "male";
+
+      // --- C. DETECTAR DIVISIÓN ---
+      let division = "world";
+      if (t.category === "Midcard") division = "midcard";
+      else if (t.category === "Tag") division = "tagteam";
+
+      // --- D. CONSTRUIR NOMBRE DE ARCHIVO ---
+      let fileName = "";
+
+      // CASO 1: MONEY IN THE BANK (Según tus capturas)
+      // Checamos columna isMITB o el nombre
+      if (
+        t.isMITB === 1 ||
+        nameLower.includes("mitb") ||
+        nameLower.includes("briefcase")
+      ) {
+        fileName = `${gender}-moneyinthebank.png`;
+      }
+      // CASO 2: TAG TEAM FEMENINO (Según captura, no tiene marca)
+      else if (division === "tagteam" && gender === "female") {
+        fileName = "female-tagteam.webp";
+      }
+      // CASO 3: ESTÁNDAR (brand-gender-division.webp)
+      else {
+        fileName = `${brand}-${gender}-${division}.webp`;
+      }
+
+      // 3. Guardar en la Base de Datos
+      db.runSync(`UPDATE titles SET imageUri = ? WHERE id = ?`, [
+        fileName,
+        t.id,
+      ]);
+      updatedCount++;
+    });
+
+    console.log(
+      `✅ ${updatedCount} títulos actualizados usando base marca: ${currentSaveBrand}.`
+    );
+    return updatedCount;
+  } catch (error) {
+    console.error("Error auto-mapeando títulos:", error);
     return 0;
   }
 };
