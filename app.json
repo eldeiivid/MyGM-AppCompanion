@@ -48,7 +48,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": ""
+        "projectId": "afc54fea-1b0b-448b-91d0-95dc32e6890d"
       }
     },
     "owner": "eldeivid",
@@ -56,7 +56,7 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/fd3d2923-4e65-4810-bada-f48bf9897fb6"
+      "url": "https://u.expo.dev/afc54fea-1b0b-448b-91d0-95dc32e6890d"
     }
   }
 }
