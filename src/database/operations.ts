@@ -399,7 +399,7 @@ export const processMatchV4 = (
   matchType: string,
   stipulationName: string,
   stipulationCost: number,
-  winnerId: number,
+  winnerId: number | null, // Acepta null
   winnerName: string,
   winnerIds: number[],
   loserIds: number[],
@@ -425,7 +425,7 @@ export const processMatchV4 = (
 
       const dbTitleName = isTitleMatch && titleId ? `Title ${titleId}` : null;
 
-      // CORRECCIÓN AQUÍ: 11 columnas, 11 signos de interrogación
+      // 1. INSERTAR EN HISTORIAL (Aceptando winnerId null)
       db.runSync(
         `INSERT INTO match_history (
           save_id, week, matchType, winnerId, winnerName, 
@@ -436,11 +436,11 @@ export const processMatchV4 = (
           saveId,
           week,
           matchType,
-          winnerId,
-          winnerName,
-          loserNames,
+          winnerId, // Puede ser null
+          winnerName || "N/A",
+          loserNames || "N/A",
           stars,
-          0, // isTitleChange inicial
+          0,
           dbTitleName,
           new Date().toISOString(),
           participantsData,
@@ -452,28 +452,32 @@ export const processMatchV4 = (
       );
       const matchHistoryId = lastMatch?.id;
 
-      // Actualizar Victorias/Derrotas
-      winnerIds.forEach((id) => {
-        db.runSync(
-          `UPDATE luchadores SET normalWins = normalWins + 1 WHERE id = ?`,
-          [id]
-        );
-      });
-      loserIds.forEach((id) => {
-        db.runSync(
-          `UPDATE luchadores SET normalLosses = normalLosses + 1 WHERE id = ?`,
-          [id]
-        );
-      });
+      // 2. ACTUALIZAR ESTADÍSTICAS (Solo si hay ganadores/perdedores reales)
+      if (winnerIds && winnerIds.length > 0) {
+        winnerIds.forEach((id) => {
+          db.runSync(
+            `UPDATE luchadores SET normalWins = normalWins + 1 WHERE id = ?`,
+            [id]
+          );
+        });
+      }
 
-      // Lógica de Títulos
-      if (isTitleMatch && titleId) {
+      if (loserIds && loserIds.length > 0) {
+        loserIds.forEach((id) => {
+          db.runSync(
+            `UPDATE luchadores SET normalLosses = normalLosses + 1 WHERE id = ?`,
+            [id]
+          );
+        });
+      }
+
+      // 3. LÓGICA DE TÍTULOS (Solo si hubo ganador válido)
+      if (isTitleMatch && titleId && winnerIds.length > 0) {
         const title: any = db.getFirstSync(
           "SELECT holderId1, holderId2, weekWon FROM titles WHERE id = ?",
           [titleId]
         );
 
-        // Si el ganador NO es el campeón actual (Cambio de título)
         if (title && !winnerIds.includes(title.holderId1)) {
           titleChanged = true;
           const newHolder1 = winnerIds[0];
@@ -509,7 +513,7 @@ export const processMatchV4 = (
         }
       }
 
-      // Cobrar costo de estipulación/producción
+      // 4. COBRAR COSTOS
       if (stipulationCost > 0) {
         db.runSync(
           `UPDATE saves SET currentCash = currentCash - ? WHERE id = ?`,
@@ -669,7 +673,7 @@ export const getCurrentShowCost = (saveId: number) => {
 export const resolveMatch = (
   saveId: number,
   matchId: number,
-  winnerId: number,
+  winnerId: number | null, // <--- AHORA ACEPTA NULL
   rating: number,
   matchData: any
 ) => {
@@ -681,40 +685,45 @@ export const resolveMatch = (
     let winners: any[] = [];
     let losers: any[] = [];
 
-    const winningTeam = teams.find((team: any) =>
-      team.some((p: any) => p.id === winnerId)
-    );
+    // SI HAY GANADOR (No es promo)
+    if (winnerId) {
+      const winningTeam = teams.find((team: any) =>
+        team.some((p: any) => p.id === winnerId)
+      );
 
-    if (winningTeam) {
-      winners = winningTeam;
-      teams.forEach((team: any) => {
-        if (team !== winningTeam) {
-          losers.push(...team);
-        }
-      });
-    } else {
-      const allParticipants: any[] = [];
-      teams.forEach((t: any) => allParticipants.push(...t));
-      const foundWinner = allParticipants.find((p) => p.id === winnerId);
-      if (foundWinner) {
-        winners = [foundWinner];
-        losers = allParticipants.filter((p) => p.id !== winnerId);
+      if (winningTeam) {
+        winners = winningTeam;
+        teams.forEach((team: any) => {
+          if (team !== winningTeam) {
+            losers.push(...team);
+          }
+        });
       } else {
-        return { success: false };
+        // Fallback: búsqueda plana por si la estructura de equipos falló
+        const allParticipants: any[] = [];
+        teams.forEach((t: any) => allParticipants.push(...t));
+        const foundWinner = allParticipants.find((p) => p.id === winnerId);
+        if (foundWinner) {
+          winners = [foundWinner];
+          losers = allParticipants.filter((p) => p.id !== winnerId);
+        }
       }
     }
+    // SI ES PROMO (winnerId es null), dejamos los arrays vacíos intencionalmente
 
     const winnerIds = winners.map((p) => p.id);
     const loserIds = losers.map((p) => p.id);
-    const winnerName = winners.map((p) => p.name).join(" & ");
-    const loserNames = losers.map((p) => p.name).join(" & ");
+    const winnerName =
+      winners.length > 0 ? winners.map((p) => p.name).join(" & ") : "N/A";
+    const loserNames =
+      losers.length > 0 ? losers.map((p) => p.name).join(" & ") : "N/A";
 
     const result = processMatchV4(
       saveId,
       matchData.matchType,
       matchData.stipulation || "Normal",
       matchData.cost || 0,
-      winnerId,
+      winnerId, // Enviamos null si es promo
       winnerName,
       winnerIds,
       loserIds,
@@ -725,9 +734,11 @@ export const resolveMatch = (
     );
 
     if (result.success) {
-      // --- LÓGICA V2: LOG DE DEFENSA ---
-      // Si era lucha titular y NO hubo cambio de título, es una defensa exitosa
-      if (matchData.isTitleMatch === 1 && !result.titleChanged) {
+      if (
+        matchData.isTitleMatch === 1 &&
+        !result.titleChanged &&
+        winnerIds.length > 0
+      ) {
         recordTitleDefense(
           saveId,
           matchData.titleId,
@@ -737,10 +748,14 @@ export const resolveMatch = (
         );
       }
 
-      const resultText = `Ganador: ${winnerName} (${rating} ⭐)`;
+      // Texto de resultado
+      const resultText = winnerId
+        ? `Ganador: ${winnerName} (${rating} ⭐)`
+        : `Segment Completed (${rating} ⭐)`;
+
       db.runSync(
-        "UPDATE planned_matches SET isCompleted = 1, resultText = ? WHERE id = ?",
-        [resultText, matchId]
+        "UPDATE planned_matches SET isCompleted = 1, resultText = ?, rating = ? WHERE id = ?",
+        [resultText, rating, matchId]
       );
 
       return { success: true, isTitleChange: result.titleChanged };
@@ -1573,5 +1588,41 @@ export const autoMapTitleImages = (saveId: number) => {
   } catch (error) {
     console.error("Error auto-mapeando títulos:", error);
     return 0;
+  }
+};
+
+export const getLuchadorTitleHistory = (saveId: number, luchadorId: number) => {
+  try {
+    return db.getAllSync(
+      `SELECT tr.*, t.name as titleName, t.imageUri, t.gender, t.category, t.isMITB
+       FROM title_reigns tr
+       JOIN titles t ON tr.titleId = t.id
+       WHERE tr.save_id = ? AND (tr.luchadorId1 = ? OR tr.luchadorId2 = ?)
+       ORDER BY tr.weekWon DESC`,
+      [saveId, luchadorId, luchadorId]
+    );
+  } catch (e) {
+    console.error("Error fetching wrestler title history", e);
+    return [];
+  }
+};
+
+export const getInactiveRivalries = (saveId: number) => {
+  try {
+    return db.getAllSync(
+      `
+      SELECT r.*, 
+             l1.name as name1, l1.imageUri as image1,
+             l2.name as name2, l2.imageUri as image2
+      FROM rivalries r
+      JOIN luchadores l1 ON r.luchador_id1 = l1.id
+      JOIN luchadores l2 ON r.luchador_id2 = l2.id
+      WHERE r.save_id = ? AND r.is_active = 0
+      ORDER BY r.id DESC
+    `,
+      [saveId]
+    );
+  } catch (e) {
+    return [];
   }
 };

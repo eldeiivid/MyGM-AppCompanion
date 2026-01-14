@@ -2,8 +2,8 @@ import { db } from "../database/db";
 
 export interface DashboardStats {
   currentWeek: number;
-  gmName: string; // <--- NUEVO
-  brandName: string; // <--- NUEVO
+  gmName: string;
+  brandName: string;
   hotStreaks: { id: number; name: string; count: number; imageUri: string }[];
   milestones: {
     title: string;
@@ -20,7 +20,7 @@ export interface DashboardStats {
   news: { type: string; text: string; subtext: string; data?: any[] }[];
 }
 
-// Helper para calcular rachas (Sin cambios)
+// Helper to calculate streaks (No changes needed here logic-wise)
 const calculateStreaksFromHistory = (
   historyItems: any[],
   allLuchadoresIds: number[]
@@ -61,7 +61,7 @@ export const getDashboardData = async (
   let brandName = "MyGM";
 
   try {
-    // 1. OBTENER ESTADO ACTUAL (Actualizado para traer nombre y marca)
+    // 1. GET CURRENT STATE
     const stateResult: any = await db.getFirstAsync(
       "SELECT currentWeek, name, brand FROM saves WHERE id = ?",
       [saveId]
@@ -73,7 +73,7 @@ export const getDashboardData = async (
       brandName = stateResult.brand || "Brand";
     }
 
-    // 2. LUCHADORES
+    // 2. ROSTER (Luchadores -> Wrestlers/Superstars)
     const luchadores: any[] = await db.getAllAsync(
       "SELECT id, name, imageUri FROM luchadores WHERE save_id = ?",
       [saveId]
@@ -84,7 +84,7 @@ export const getDashboardData = async (
     );
     const allLuchadoresIds = luchadores.map((l) => l.id);
 
-    // 3. HISTORIAL
+    // 3. HISTORY
     const fullHistory: any[] = await db.getAllAsync(
       "SELECT * FROM match_history WHERE save_id = ? ORDER BY id ASC",
       [saveId]
@@ -98,7 +98,7 @@ export const getDashboardData = async (
     const momentumList = Object.entries(currentStreaks)
       .map(([id, count]) => ({
         id: Number(id),
-        name: idToLuchadorMap[id]?.name || "Luchador",
+        name: idToLuchadorMap[id]?.name || "Wrestler",
         imageUri: idToLuchadorMap[id]?.imageUri,
         count,
       }))
@@ -106,7 +106,7 @@ export const getDashboardData = async (
       .sort((a, b) => Math.abs(b.count) - Math.abs(a.count))
       .slice(0, 10);
 
-    // 4. HITOS
+    // 4. MILESTONES (Titles)
     const titles: any[] = await db.getAllAsync(
       `SELECT t.id, t.name as titleName, t.weekWon, l.name as champName 
        FROM titles t 
@@ -141,7 +141,7 @@ export const getDashboardData = async (
       })
       .sort((a, b) => b.days - a.days);
 
-    // 5. FINANZAS
+    // 5. FINANCES
     const financesRaw: any[] = await db.getAllAsync(
       `SELECT week, type, amount FROM finances WHERE save_id = ? AND week >= ? ORDER BY week ASC`,
       [saveId, currentWeek - 3]
@@ -165,7 +165,7 @@ export const getDashboardData = async (
       profit: f.income - f.expenses,
     }));
 
-    // 6. NOTICIAS INTELIGENTES
+    // 6. SMART NEWS GENERATION
     const news: any[] = [];
     const lastShowWeek = currentWeek > 1 ? currentWeek - 1 : 1;
 
@@ -178,7 +178,7 @@ export const getDashboardData = async (
       allLuchadoresIds
     );
 
-    // A) RACHAS ROTAS
+    // A) BROKEN STREAKS & UPSETS
     lastWeekMatches.forEach((match) => {
       if (!match.participants) return;
       try {
@@ -189,13 +189,13 @@ export const getDashboardData = async (
         winners.forEach((id: number) => {
           const prevStreak = oldStreaks[id] || 0;
           if (prevStreak <= -3) {
-            const name = idToLuchadorMap[id]?.name || "Luchador";
+            const name = idToLuchadorMap[id]?.name || "Wrestler";
             news.push({
               type: "STREAK_BROKEN",
-              text: "¡REDENCIÓN!",
-              subtext: `${name} rompió su racha de ${Math.abs(
+              text: "REDEMPTION!",
+              subtext: `${name} snapped a ${Math.abs(
                 prevStreak
-              )} derrotas.`,
+              )} match losing streak.`,
             });
           }
         });
@@ -203,18 +203,18 @@ export const getDashboardData = async (
         losers.forEach((id: number) => {
           const prevStreak = oldStreaks[id] || 0;
           if (prevStreak >= 3) {
-            const name = idToLuchadorMap[id]?.name || "Luchador";
+            const name = idToLuchadorMap[id]?.name || "Wrestler";
             news.push({
               type: "UPSET",
-              text: "SORPRESA",
-              subtext: `${name} pierde tras ${prevStreak} victorias seguidas.`,
+              text: "UPSET ALERT",
+              subtext: `${name} lost after ${prevStreak} consecutive wins.`,
             });
           }
         });
       } catch (e) {}
     });
 
-    // B) TÍTULOS
+    // B) TITLES
     const titleMatches = lastWeekMatches.filter(
       (m) => m.titleName !== null && m.titleName !== undefined
     );
@@ -230,37 +230,37 @@ export const getDashboardData = async (
         }
       }
 
-      const displayTitle = realTitleName || "Campeonato";
-      const winnerDisplay = match.winnerName || "Campeón";
+      const displayTitle = realTitleName || "Championship";
+      const winnerDisplay = match.winnerName || "Champion";
 
       if (match.isTitleChange === 1) {
         news.push({
           type: "TITLE_CHANGE",
-          text: "¡NUEVO CAMPEÓN!",
-          subtext: `${winnerDisplay} ha capturado el ${displayTitle}.`,
+          text: "NEW CHAMPION!",
+          subtext: `${winnerDisplay} has captured the ${displayTitle}.`,
         });
       } else {
         news.push({
           type: "TITLE_RETAIN",
           text: "AND STILL...",
-          subtext: `${winnerDisplay} retuvo exitosamente el ${displayTitle}.`,
+          subtext: `${winnerDisplay} successfully retained the ${displayTitle}.`,
         });
       }
     });
 
-    // C) RACHAS ACTUALES
+    // C) CURRENT STREAKS
     const activeHotStreaks = momentumList.filter((p) => p.count >= 4);
     if (activeHotStreaks.length === 1) {
       news.push({
         type: "STREAK",
-        text: `${activeHotStreaks[0].name} IMPARABLE`,
-        subtext: `Acumula ${activeHotStreaks[0].count} victorias al hilo.`,
+        text: `${activeHotStreaks[0].name} ON FIRE`,
+        subtext: `Riding a ${activeHotStreaks[0].count} match winning streak.`,
       });
     } else if (activeHotStreaks.length > 1) {
       news.push({
         type: "GROUP_STREAK",
-        text: "MOMENTUM POSITIVO",
-        subtext: `${activeHotStreaks.length} luchadores están imparables.`,
+        text: "MOMENTUM SHIFT",
+        subtext: `${activeHotStreaks.length} superstars are currently unstoppable.`,
         data: activeHotStreaks,
       });
     }
@@ -269,35 +269,35 @@ export const getDashboardData = async (
     if (activeColdStreaks.length === 1) {
       news.push({
         type: "BAD_STREAK",
-        text: "CRISIS",
-        subtext: `${activeColdStreaks[0].name} suma ${Math.abs(
+        text: "COLD STREAK",
+        subtext: `${activeColdStreaks[0].name} has lost ${Math.abs(
           activeColdStreaks[0].count
-        )} derrotas seguidas.`,
+        )} matches in a row.`,
       });
     } else if (activeColdStreaks.length > 1) {
       news.push({
         type: "GROUP_BAD_STREAK",
-        text: "MALA RACHA",
-        subtext: `${activeColdStreaks.length} luchadores en crisis de resultados.`,
+        text: "LOSING SKID",
+        subtext: `${activeColdStreaks.length} superstars are struggling to find a win.`,
         data: activeColdStreaks,
       });
     }
 
-    // D) FINANZAS
+    // D) FINANCES
     const lastWeekFin = finances.find((f: any) => f.week === lastShowWeek);
     if (lastWeekFin && lastWeekFin.profit < 0) {
       news.push({
         type: "FINANCE_BAD",
-        text: "Números Rojos",
-        subtext: "La semana pasada perdimos dinero. Revisa los gastos.",
+        text: "IN THE RED",
+        subtext: "Negative profit last week. Watch your budget.",
       });
     }
 
     if (news.length === 0) {
       news.push({
         type: "INFO",
-        text: "Semana Tranquila",
-        subtext: "Todo listo para el siguiente show.",
+        text: "Quiet Week",
+        subtext: "Everything set for the next show.",
       });
     }
 
@@ -320,17 +320,17 @@ export const getDashboardData = async (
 
     return {
       currentWeek,
-      gmName, // <--- Devolvemos GM
-      brandName, // <--- Devolvemos Brand
+      gmName,
+      brandName,
       hotStreaks: momentumList,
       milestones,
       finances,
       news,
     };
   } catch (error) {
-    console.error("Error calculando Dashboard:", error);
+    console.error("Error calculating Dashboard:", error);
     return {
-      currentWeek,
+      currentWeek: 1,
       gmName: "GM",
       brandName: "Brand",
       hotStreaks: [],

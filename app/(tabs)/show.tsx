@@ -71,17 +71,15 @@ export default function ShowScreen() {
     others: "",
   });
 
-  // --- HELPER: CONSTRUIR URL DEL TÍTULO (Reutilizado) ---
+  // --- HELPER: CONSTRUIR URL DEL TÍTULO ---
   const getTitleImage = (titleId: number) => {
     const title = titles.find((t) => t.id === titleId);
     if (!title) return null;
 
-    // 1. PRIORIDAD: DB
     if (title.imageUri && title.imageUri !== "") {
       return `${TITLES_REPO_URL}${title.imageUri}`;
     }
 
-    // 2. FALLBACK
     const gender = title.gender === "Female" ? "female" : "male";
     if (
       title.isMITB === 1 ||
@@ -173,12 +171,27 @@ export default function ShowScreen() {
 
   const handleFinalizeMatch = () => {
     if (!saveId) return;
-    if (!winnerId) return Alert.alert("Error", "Please select a winner.");
+
+    // DETECCIÓN SEGURA DE PROMO
+    const isPromo =
+      selectedMatch?.matchType &&
+      (selectedMatch.matchType.includes("Promo") ||
+        selectedMatch.matchType.includes("Interview"));
+
+    // Si NO es promo, obligamos a elegir ganador
+    if (!isPromo && !winnerId) {
+      return Alert.alert("Error", "Please select a winner.");
+    }
+
+    // SOLUCIÓN AL ERROR DE TYPESCRIPT Y BASE DE DATOS:
+    // Si es promo, enviamos 'null' casteado a 'any' para que TS no se queje.
+    // La base de datos debe ser capaz de manejar NULL en winner_id.
+    const finalWinnerId = isPromo ? null : winnerId;
 
     const result = resolveMatch(
       saveId,
       selectedMatch.id,
-      winnerId,
+      finalWinnerId as any,
       rating,
       selectedMatch
     );
@@ -188,11 +201,19 @@ export default function ShowScreen() {
       loadData();
       let msg = `${rating} Stars recorded.`;
       if (result.isTitleChange) msg += "\n\n🏆 NEW CHAMPION CROWNED!";
+
+      // Feedback más rápido
       setTimeout(() => {
-        Alert.alert("Match Finalized", msg);
-      }, 300);
+        // No mostramos alerta en promos para agilizar, solo en luchas
+        if (!isPromo) {
+          Alert.alert("Match Finalized", msg);
+        }
+      }, 100);
     } else {
-      Alert.alert("Error", "Could not save match result.");
+      Alert.alert(
+        "Error",
+        "Could not save match result. Check database constraints."
+      );
     }
   };
 
@@ -262,6 +283,24 @@ export default function ShowScreen() {
       }
     } catch (e) {}
     return list;
+  };
+
+  // --- RENDER STARS HELPER (NUEVO) ---
+  const renderStars = (count: number) => {
+    // Aseguramos que count sea un número
+    const safeCount = Number(count) || 0;
+    return (
+      <View style={{ flexDirection: "row", gap: 2 }}>
+        {[1, 2, 3, 4, 5].map((i) => (
+          <Ionicons
+            key={i}
+            name={i <= safeCount ? "star" : "star-outline"}
+            size={12}
+            color={i <= safeCount ? "#F59E0B" : "#444"}
+          />
+        ))}
+      </View>
+    );
   };
 
   // --- TEAM COMPONENT ---
@@ -384,7 +423,11 @@ export default function ShowScreen() {
     isActive,
   }: RenderItemParams<any>) => {
     const isCompleted = !!match.isCompleted;
-    const isPromo = match.matchType.startsWith("Promo:");
+    // Detección segura de Promo
+    const isPromo =
+      match.matchType &&
+      (match.matchType.includes("Promo") ||
+        match.matchType.includes("Segment"));
     const isTitle = !!match.isTitleMatch;
 
     let activeTeams: Luchador[][] = [];
@@ -455,17 +498,16 @@ export default function ShowScreen() {
                   </Text>
                 </View>
 
-                {/* --- SECCIÓN DE TÍTULO MEJORADA --- */}
+                {/* --- SECCIÓN DE TÍTULO --- */}
                 {isTitle && (
                   <View
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
-                      gap: 6, // Un poco más de espacio
+                      gap: 6,
                       paddingRight: 10,
                     }}
                   >
-                    {/* Imagen del título pequeña */}
                     {titleImageUri ? (
                       <Image
                         source={{ uri: titleImageUri }}
@@ -497,7 +539,6 @@ export default function ShowScreen() {
 
             {/* --- VISUALIZACIÓN LUCHADORES --- */}
             {isMultiManMatch ? (
-              // 3-WAY / 4-WAY
               <View style={styles.multiManRow}>
                 {activeTeams.map((team, index) => (
                   <View key={index} style={styles.multiManItem}>
@@ -509,7 +550,6 @@ export default function ShowScreen() {
                 ))}
               </View>
             ) : (
-              // 1 VS 1 O TAG TEAM
               <View style={styles.facesRow}>
                 {getTeamComponent(activeTeams[0] || [], "left", false)}
                 <Text style={styles.vsText}>VS</Text>
@@ -519,17 +559,19 @@ export default function ShowScreen() {
 
             {isCompleted ? (
               <View style={styles.resultBox}>
-                <View>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.resultLabel}>WINNER</Text>
-                  <Text style={styles.resultValue}>
-                    {match.resultText
+                  <Text style={styles.resultValue} numberOfLines={1}>
+                    {/* Logica para mostrar ganador o 'N/A' si es promo */}
+                    {!isPromo && match.resultText
                       ? match.resultText.replace("Ganador: ", "").split(" (")[0]
-                      : "N/A"}
+                      : "---"}
                   </Text>
                 </View>
-                <View style={styles.ratingBadge}>
-                  <Ionicons name="star" size={12} color="#F59E0B" />
-                  <Text style={styles.ratingText}>{match.rating || 0}</Text>
+                {/* AQUI MOSTRAMOS LAS ESTRELLAS VISUALES */}
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={styles.resultLabel}>RATING</Text>
+                  {renderStars(match.rating)}
                 </View>
               </View>
             ) : (
@@ -560,6 +602,12 @@ export default function ShowScreen() {
       </ScaleDecorator>
     );
   };
+
+  // Detectar si el seleccionado es promo para el modal
+  const isPromoSelected =
+    selectedMatch?.matchType &&
+    (selectedMatch.matchType.includes("Promo") ||
+      selectedMatch.matchType.includes("Segment"));
 
   return (
     <View style={styles.container}>
@@ -671,62 +719,73 @@ export default function ShowScreen() {
         >
           <BlurView intensity={95} tint="dark" style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Match Result</Text>
+              <Text style={styles.modalTitle}>
+                {isPromoSelected ? "Segment Rating" : "Match Result"}
+              </Text>
               <TouchableOpacity onPress={() => setModalVisible(false)}>
                 <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.inputLabel}>SELECT WINNER</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 10, paddingBottom: 20 }}
-            >
-              {getParticipantsList().map((p) => (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[
-                    styles.winnerCard,
-                    winnerId === p.id && {
-                      borderColor: brandTheme,
-                      backgroundColor: brandTheme + "20",
-                    },
-                  ]}
-                  onPress={() => setWinnerId(p.id)}
+
+            {/* SOLO MOSTRAR GANADOR SI NO ES PROMO */}
+            {!isPromoSelected && (
+              <>
+                <Text style={styles.inputLabel}>SELECT WINNER</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 10, paddingBottom: 20 }}
                 >
-                  {p.imageUri ? (
-                    <Image
-                      source={{ uri: getWrestlerImage(p.imageUri) }}
-                      style={styles.winnerImg}
-                      contentFit="cover"
-                      transition={500}
-                    />
-                  ) : (
-                    <View style={styles.winnerPlaceholder}>
-                      <Text style={{ color: "#FFF" }}>{p.name.charAt(0)}</Text>
-                    </View>
-                  )}
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.winnerName,
-                      winnerId === p.id && { color: brandTheme },
-                    ]}
-                  >
-                    {p.name}
-                  </Text>
-                  {winnerId === p.id && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={18}
-                      color={brandTheme}
-                      style={{ position: "absolute", top: 5, right: 5 }}
-                    />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <Text style={styles.inputLabel}>MATCH RATING</Text>
+                  {getParticipantsList().map((p) => (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={[
+                        styles.winnerCard,
+                        winnerId === p.id && {
+                          borderColor: brandTheme,
+                          backgroundColor: brandTheme + "20",
+                        },
+                      ]}
+                      onPress={() => setWinnerId(p.id)}
+                    >
+                      {p.imageUri ? (
+                        <Image
+                          source={{ uri: getWrestlerImage(p.imageUri) }}
+                          style={styles.winnerImg}
+                          contentFit="cover"
+                          transition={500}
+                        />
+                      ) : (
+                        <View style={styles.winnerPlaceholder}>
+                          <Text style={{ color: "#FFF" }}>
+                            {p.name.charAt(0)}
+                          </Text>
+                        </View>
+                      )}
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.winnerName,
+                          winnerId === p.id && { color: brandTheme },
+                        ]}
+                      >
+                        {p.name}
+                      </Text>
+                      {winnerId === p.id && (
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={18}
+                          color={brandTheme}
+                          style={{ position: "absolute", top: 5, right: 5 }}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+
+            <Text style={styles.inputLabel}>RATING</Text>
             <View style={styles.starsRow}>
               {[1, 2, 3, 4, 5].map((star) => (
                 <TouchableOpacity key={star} onPress={() => setRating(star)}>
@@ -742,12 +801,14 @@ export default function ShowScreen() {
               style={[
                 styles.confirmBtn,
                 { backgroundColor: brandTheme },
-                !winnerId && { opacity: 0.5 },
+                !isPromoSelected && !winnerId && { opacity: 0.5 },
               ]}
-              disabled={!winnerId}
+              disabled={!isPromoSelected && !winnerId}
               onPress={handleFinalizeMatch}
             >
-              <Text style={styles.confirmText}>CONFIRM RESULT</Text>
+              <Text style={styles.confirmText}>
+                {isPromoSelected ? "FINISH SEGMENT" : "CONFIRM RESULT"}
+              </Text>
             </TouchableOpacity>
           </BlurView>
         </KeyboardAvoidingView>
@@ -838,7 +899,11 @@ export default function ShowScreen() {
                   TOTAL REVENUE
                 </Text>
                 <Text
-                  style={{ color: "#10B981", fontSize: 24, fontWeight: "900" }}
+                  style={{
+                    color: "#10B981",
+                    fontSize: 24,
+                    fontWeight: "900",
+                  }}
                 >
                   ${calculateTotalIncome().toLocaleString()}
                 </Text>
@@ -881,7 +946,7 @@ export default function ShowScreen() {
 
             <ScrollView style={{ maxHeight: 400 }}>
               {matches.map((m, idx) => {
-                const isPromo = m.matchType.startsWith("Promo");
+                const isPromo = m.matchType && m.matchType.startsWith("Promo");
                 if (m.cost > 0) {
                   return (
                     <View key={idx} style={styles.costItem}>
@@ -1078,8 +1143,15 @@ const styles = StyleSheet.create({
     borderTopColor: "rgba(255,255,255,0.05)",
     paddingTop: 10,
   },
-  resultLabel: { color: "#64748B", fontSize: 10, fontWeight: "bold" },
+  resultLabel: {
+    color: "#64748B",
+    fontSize: 10,
+    fontWeight: "bold",
+    marginBottom: 2,
+  },
   resultValue: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
+
+  // Rating styles
   ratingBadge: {
     flexDirection: "row",
     alignItems: "center",

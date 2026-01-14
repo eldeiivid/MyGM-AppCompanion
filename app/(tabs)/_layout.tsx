@@ -25,7 +25,7 @@ export default function TabLayout() {
         tabBarShowLabel: false,
         // Colores: Activo usa tu tema, inactivo un gris más sutil
         tabBarActiveTintColor: brandTheme || "#FFF",
-        tabBarInactiveTintColor: "rgba(255,255,255,0.4)",
+        tabBarInactiveTintColor: "rgba(255,255,255,0.6)",
 
         // Estilos de la barra flotante
         tabBarStyle: styles.bar,
@@ -35,7 +35,7 @@ export default function TabLayout() {
         tabBarBackground: () => (
           <View style={styles.blurWrap}>
             <BlurView
-              intensity={50} // Blur intenso
+              intensity={20} // Blur intenso
               tint="dark" // Tinte oscuro nativo
               style={StyleSheet.absoluteFill}
             />
@@ -109,10 +109,10 @@ const styles = StyleSheet.create({
     overflow: "hidden", // Recorta el blur a la forma de cápsula
 
     // FONDO SEMI-SÓLIDO (Clave para que se vea oscuro y no transparente)
-    backgroundColor: "rgba(53, 53, 53, 0.4)",
+    backgroundColor: "rgba(53, 53, 53, 0.2)",
 
     // Borde muy fino y sutil
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderColor: "rgba(255, 255, 255, 0.5)",
   },
 });

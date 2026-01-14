@@ -7,6 +7,7 @@ import {
   Dimensions,
   FlatList,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Modal,
   Platform,
   ScrollView,
@@ -15,6 +16,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  UIManager,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -25,6 +27,14 @@ import {
   getGameState,
   getTransactionHistory,
 } from "../../src/database/operations";
+
+// Enable LayoutAnimation for accordion effect
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const { width } = Dimensions.get("window");
 
@@ -53,6 +63,9 @@ export default function FinancesScreen() {
   const [historyChartData, setHistoryChartData] = useState<any[]>([]);
   const [recentChartData, setRecentChartData] = useState<any[]>([]);
 
+  // Estado para acordeón de historial
+  const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
+
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
   const [transactionType, setTransactionType] = useState<"IN" | "OUT">("OUT");
@@ -72,20 +85,29 @@ export default function FinancesScreen() {
     try {
       const allHistory = [];
       for (let w = currentWeek; w >= 1; w--) {
+        // Traemos TODO el detalle de esa semana
         const rows: any[] = db.getAllSync(
-          `SELECT type, amount FROM finances WHERE save_id = ? AND week = ?`,
+          `SELECT * FROM finances WHERE save_id = ? AND week = ? ORDER BY id DESC`,
           [saveId, w]
         );
+
         let income = 0;
         let expense = 0;
+
         rows.forEach((r) => {
           if (r.type === "IN" || r.type === "INCOME") income += r.amount;
           else expense += r.amount;
         });
-        allHistory.push({ week: w, income, expense });
+
+        allHistory.push({
+          week: w,
+          income,
+          expense,
+          details: rows, // Guardamos las transacciones aquí
+        });
       }
       setHistoryChartData(allHistory);
-      // Last 4 weeks for dashboard
+      // Last 4 weeks for dashboard (reversed for visual order)
       setRecentChartData(allHistory.slice(0, 4).reverse());
     } catch (e) {
       console.error(e);
@@ -114,39 +136,100 @@ export default function FinancesScreen() {
     loadData();
   };
 
-  // --- RENDER: HISTORY BAR (Horizontal) ---
-  const renderHistoryHorizontalBar = (d: any) => {
-    const maxVal = Math.max(d.income, d.expense, 1);
+  const toggleWeekExpand = (week: number) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedWeek(expandedWeek === week ? null : week);
+  };
+
+  // --- RENDER: HISTORY ITEM (Expandable) ---
+  const renderHistoryItem = ({ item }: { item: any }) => {
+    const maxVal = Math.max(item.income, item.expense, 1);
     const FULL_BAR_WIDTH = width - 80;
+    const isExpanded = expandedWeek === item.week;
 
     return (
-      <View key={d.week} style={styles.hContainer}>
-        <Text style={styles.hWeekTitle}>WEEK {d.week}</Text>
-        <View style={styles.hBarsContainer}>
-          <View
-            style={[
-              styles.hBar,
-              {
-                width: (d.income / maxVal) * FULL_BAR_WIDTH,
-                backgroundColor: "#10B981",
-              },
-            ]}
+      <View style={styles.hContainer}>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => toggleWeekExpand(item.week)}
+          style={styles.hHeader}
+        >
+          <View>
+            <Text style={styles.hWeekTitle}>WEEK {item.week}</Text>
+            <View style={styles.hBarsContainer}>
+              <View
+                style={[
+                  styles.hBar,
+                  {
+                    width: (item.income / maxVal) * FULL_BAR_WIDTH,
+                    backgroundColor: "#10B981",
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.hBar,
+                  {
+                    width: (item.expense / maxVal) * FULL_BAR_WIDTH,
+                    backgroundColor: "#EF4444",
+                    marginTop: 4,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+          <Ionicons
+            name={isExpanded ? "chevron-up" : "chevron-down"}
+            size={20}
+            color="#64748B"
           />
-          <View
-            style={[
-              styles.hBar,
-              {
-                width: (d.expense / maxVal) * FULL_BAR_WIDTH,
-                backgroundColor: "#EF4444",
-                marginTop: 4,
-              },
-            ]}
-          />
-        </View>
+        </TouchableOpacity>
+
         <View style={styles.hNumbersLeft}>
-          <Text style={styles.hIncomeNum}>+${d.income.toLocaleString()}</Text>
-          <Text style={styles.hExpenseNum}>-${d.expense.toLocaleString()}</Text>
+          <Text style={styles.hIncomeNum}>
+            +${item.income.toLocaleString()}
+          </Text>
+          <Text style={styles.hExpenseNum}>
+            -${item.expense.toLocaleString()}
+          </Text>
         </View>
+
+        {/* DETALLE EXPANDIBLE */}
+        {isExpanded && (
+          <View style={styles.hDetailsBox}>
+            <Text style={styles.detailHeader}>TRANSACTION BREAKDOWN</Text>
+            {item.details.length === 0 ? (
+              <Text
+                style={{ color: "#666", fontSize: 12, fontStyle: "italic" }}
+              >
+                No records found.
+              </Text>
+            ) : (
+              item.details.map((t: any, idx: number) => (
+                <View key={idx} style={styles.detailRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailDesc}>{t.description}</Text>
+                    <Text style={styles.detailCat}>{t.category}</Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.detailAmount,
+                      {
+                        color:
+                          t.type === "IN" || t.type === "INCOME"
+                            ? "#10B981"
+                            : "#EF4444",
+                      },
+                    ]}
+                  >
+                    {t.type === "IN" || t.type === "INCOME" ? "+" : "-"}$
+                    {Math.abs(t.amount).toLocaleString()}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        )}
       </View>
     );
   };
@@ -459,7 +542,7 @@ export default function FinancesScreen() {
             data={historyChartData}
             keyExtractor={(item) => item.week.toString()}
             contentContainerStyle={{ padding: 20 }}
-            renderItem={({ item }) => renderHistoryHorizontalBar(item)}
+            renderItem={renderHistoryItem}
           />
         </View>
       </Modal>
@@ -608,10 +691,16 @@ const styles = StyleSheet.create({
   hContainer: {
     marginBottom: 20,
     backgroundColor: "rgba(255,255,255,0.05)",
-    padding: 15,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
+    overflow: "hidden",
+  },
+  hHeader: {
+    padding: 15,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   hWeekTitle: {
     fontSize: 12,
@@ -619,11 +708,40 @@ const styles = StyleSheet.create({
     color: "#FFF",
     marginBottom: 10,
   },
-  hBarsContainer: { gap: 6 },
+  hBarsContainer: { gap: 6, width: width - 120 }, // Limit width to allow flex
   hBar: { height: 10, borderRadius: 5 },
-  hNumbersLeft: { flexDirection: "row", marginTop: 10, gap: 15 },
+  hNumbersLeft: {
+    flexDirection: "row",
+    marginTop: 0,
+    gap: 15,
+    paddingHorizontal: 15,
+    paddingBottom: 15,
+  },
   hIncomeNum: { fontSize: 12, fontWeight: "bold", color: "#10B981" },
   hExpenseNum: { fontSize: 12, fontWeight: "bold", color: "#EF4444" },
+
+  // DETAILS EXPANDED
+  hDetailsBox: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+    padding: 15,
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
+  detailHeader: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#94A3B8",
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  detailDesc: { color: "#FFF", fontSize: 12, fontWeight: "600" },
+  detailCat: { color: "#64748B", fontSize: 10 },
+  detailAmount: { fontSize: 12, fontWeight: "bold" },
 
   // MODALS
   modalOverlay: {

@@ -29,6 +29,7 @@ import {
   getActiveRivalries,
   getAllLuchadores,
   getAllTitles,
+  getInactiveRivalries,
   getRivalryMatches,
 } from "../../src/database/operations";
 
@@ -46,11 +47,9 @@ if (
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
 
-// URL Base
 const TITLES_REPO_URL =
   "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/titles/";
 
-// Options
 const SORT_OPTIONS = [
   { id: "Name", label: "Name (A-Z)" },
   { id: "RatingDesc", label: "Rating (High-Low)" },
@@ -61,6 +60,8 @@ const SORT_OPTIONS = [
 ];
 
 const ROLE_OPTIONS = ["Todos", "Face", "Heel"];
+const GENDER_OPTIONS = ["Todos", "Male", "Female"];
+const STATUS_OPTIONS = ["All", "Champions", "Draft", "Expiring"];
 
 export default function LockerRoomScreen() {
   const router = useRouter();
@@ -70,6 +71,7 @@ export default function LockerRoomScreen() {
   const [roster, setRoster] = useState<any[]>([]);
   const [titles, setTitles] = useState<any[]>([]);
   const [rivalries, setRivalries] = useState<any[]>([]);
+  const [pastRivalries, setPastRivalries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // UI States
@@ -83,8 +85,17 @@ export default function LockerRoomScreen() {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [rivalryModalVisible, setRivalryModalVisible] = useState(false);
   const [rivalryDetailVisible, setRivalryDetailVisible] = useState(false);
+  const [historyModalVisible, setHistoryModalVisible] = useState(false);
+
+  // States for Active Rivalry Modal
   const [selectedRivalryData, setSelectedRivalryData] = useState<any>(null);
   const [rivalryHistory, setRivalryHistory] = useState<any[]>([]);
+
+  // States for Archive Accordion (Expanded items)
+  const [expandedRivalryId, setExpandedRivalryId] = useState<number | null>(
+    null
+  );
+  const [expandedHistory, setExpandedHistory] = useState<any[]>([]);
 
   // Rivalry Creation
   const [selectedRival1, setSelectedRival1] = useState<number | null>(null);
@@ -103,6 +114,7 @@ export default function LockerRoomScreen() {
 
   // --- HELPERS ---
   const getTitleImage = (title: any) => {
+    if (!title) return null;
     if (title.imageUri && title.imageUri !== "") {
       return `${TITLES_REPO_URL}${title.imageUri}`;
     }
@@ -138,10 +150,25 @@ export default function LockerRoomScreen() {
 
     const luchadoresData = getAllLuchadores(saveId);
     const titlesData = getAllTitles(saveId);
-    let rivalriesData = getActiveRivalries(saveId);
 
-    rivalriesData = rivalriesData.map((r: any) => {
-      const matches = getRivalryMatches(saveId, r.luchador_id1, r.luchador_id2);
+    // Active
+    let rivalriesData = getActiveRivalries(saveId);
+    rivalriesData = processRivalries(rivalriesData, saveId);
+
+    // Archived
+    let inactiveData = getInactiveRivalries(saveId);
+    inactiveData = processRivalries(inactiveData, saveId);
+
+    setRoster(luchadoresData);
+    setTitles(titlesData);
+    setRivalries(rivalriesData);
+    setPastRivalries(inactiveData);
+    setLoading(false);
+  };
+
+  const processRivalries = (list: any[], sId: number) => {
+    return list.map((r: any) => {
+      const matches = getRivalryMatches(sId, r.luchador_id1, r.luchador_id2);
       if (matches.length === 0) return { ...r, calculatedHeat: 1 };
       const totalStars = matches.reduce(
         (sum: number, m: any) => sum + (m.rating || 0),
@@ -155,11 +182,6 @@ export default function LockerRoomScreen() {
       else if (avg >= 1.5) heat = 2;
       return { ...r, calculatedHeat: heat };
     });
-
-    setRoster(luchadoresData);
-    setTitles(titlesData);
-    setRivalries(rivalriesData);
-    setLoading(false);
   };
 
   useFocusEffect(
@@ -168,7 +190,6 @@ export default function LockerRoomScreen() {
     }, [saveId])
   );
 
-  // Handlers
   const handleCreateRivalry = () => {
     if (selectedRival1 && selectedRival2 && saveId) {
       createRivalry(saveId, selectedRival1, selectedRival2, 1);
@@ -181,6 +202,7 @@ export default function LockerRoomScreen() {
 
   const handleDeleteRivalry = (id: number) => {
     deleteRivalry(id);
+    setRivalryDetailVisible(false);
     loadData();
   };
 
@@ -191,27 +213,53 @@ export default function LockerRoomScreen() {
       rivalryItem.luchador_id1,
       rivalryItem.luchador_id2
     );
-    const r1 = roster.find((r) => r.id === rivalryItem.luchador_id1);
-    const r2 = roster.find((r) => r.id === rivalryItem.luchador_id2);
+
+    const activeR1 = roster.find((r) => r.id === rivalryItem.luchador_id1);
+    const activeR2 = roster.find((r) => r.id === rivalryItem.luchador_id2);
+
+    const r1 = activeR1 || {
+      name: rivalryItem.name1 || "Unknown",
+      imageUri: rivalryItem.image1 || "",
+    };
+    const r2 = activeR2 || {
+      name: rivalryItem.name2 || "Unknown",
+      imageUri: rivalryItem.image2 || "",
+    };
+
     setSelectedRivalryData({ ...rivalryItem, r1, r2 });
     setRivalryHistory(history);
     setRivalryDetailVisible(true);
   };
 
-  // --- LOGICA DE FILTROS ---
+  // --- NUEVA FUNCIÓN: Toggle Expand Archive ---
+  const toggleArchiveExpand = (item: any) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (expandedRivalryId === item.id) {
+      setExpandedRivalryId(null);
+    } else {
+      if (saveId) {
+        const history = getRivalryMatches(
+          saveId,
+          item.luchador_id1,
+          item.luchador_id2
+        );
+        setExpandedHistory(history);
+      }
+      setExpandedRivalryId(item.id);
+    }
+  };
+
+  // --- FILTER LOGIC ---
   const getProcessedRoster = () => {
     let data = [...roster];
-
     if (searchQuery.trim() !== "") {
       const query = searchQuery.toLowerCase();
       data = data.filter((l) => l.name.toLowerCase().includes(query));
     }
-
     if (filters.gender !== "Todos")
       data = data.filter((l) => l.gender === filters.gender);
     if (filters.role !== "Todos")
       data = data.filter((l) => l.crowd === filters.role);
-
     if (filters.status === "Champions") {
       data = data.filter((l) =>
         titles.some((t) => t.holderId1 === l.id || t.holderId2 === l.id)
@@ -223,7 +271,6 @@ export default function LockerRoomScreen() {
         (l) => l.isDraft === 0 && l.weeksLeft <= 5 && l.weeksLeft > 0
       );
     }
-
     data.sort((a, b) => {
       switch (filters.sortBy) {
         case "Name":
@@ -243,7 +290,7 @@ export default function LockerRoomScreen() {
 
   const filteredData = getProcessedRoster();
 
-  // --- NUEVA SECCIÓN: FILTROS ACTIVOS VISIBLES ---
+  // --- RENDERERS ---
   const renderActiveFilters = () => {
     const activeFilters = [];
     if (filters.gender !== "Todos")
@@ -265,8 +312,6 @@ export default function LockerRoomScreen() {
         resetValue: "All",
       });
 
-    // El ordenamiento no siempre se considera "filtro activo" visualmente, pero se puede añadir si quieres.
-
     if (activeFilters.length === 0) return null;
 
     return (
@@ -280,9 +325,8 @@ export default function LockerRoomScreen() {
           onPress={() => setFilters(INITIAL_FILTERS)}
         >
           <Text style={styles.clearAllText}>Clear All</Text>
-          <Ionicons name="close-circle" size={14} color="#FFF" />
+          <Ionicons name="close-circle" size={16} color="#FFF" />
         </TouchableOpacity>
-
         {activeFilters.map((f, i) => (
           <TouchableOpacity
             key={i}
@@ -290,27 +334,23 @@ export default function LockerRoomScreen() {
             onPress={() => setFilters({ ...filters, [f.type]: f.resetValue })}
           >
             <Text style={styles.activeBadgeText}>{f.label}</Text>
-            <Ionicons name="close" size={12} color="#CBD5E1" />
+            <Ionicons name="close" size={14} color="#CBD5E1" />
           </TouchableOpacity>
         ))}
       </ScrollView>
     );
   };
 
-  // --- NUEVO DISEÑO DE CARTA CORREGIDO (Estilo FUT) ---
   const renderWrestlerCard = ({ item }: { item: any }) => {
     const isExpired = item.isDraft === 0 && item.weeksLeft <= 0;
     const isHeel = item.crowd === "Heel";
-    const hasTitle = titles.some(
+    const wrestlerTitle = titles.find(
       (t) => t.holderId1 === item.id || t.holderId2 === item.id
     );
-
-    // Definimos colores
     const gradientColors = isHeel
-      ? ["#7f1d1d", "#0f0f0f"] // Rojo a oscuro
-      : ["#1e3a8a", "#0f0f0f"]; // Azul a oscuro
-
-    const borderColor = hasTitle ? "#F59E0B" : "rgba(255,255,255,0.2)";
+      ? ["#7f1d1d", "#000000"]
+      : ["#1e3a8a", "#000000"];
+    const borderColor = wrestlerTitle ? "#F59E0B" : "rgba(255,255,255,0.2)";
 
     return (
       <TouchableOpacity
@@ -322,30 +362,28 @@ export default function LockerRoomScreen() {
           colors={gradientColors as any}
           style={[
             styles.cardBackground,
-            { borderColor: borderColor, borderWidth: hasTitle ? 2 : 1 },
+            { borderColor: borderColor, borderWidth: wrestlerTitle ? 2 : 1 },
           ]}
         >
-          {/* 1. IMAGEN DEL LUCHADOR (Detrás del texto, ocupando todo) */}
+          <View style={styles.cardHeaderOverlay}>
+            <View style={styles.ratingContainer}>
+              <Text style={styles.ratingNumber}>{item.ringLevel}</Text>
+              <Text style={styles.ratingLabel}>OVR</Text>
+            </View>
+            {wrestlerTitle && (
+              <Image
+                source={{ uri: getTitleImage(wrestlerTitle) ?? "" }}
+                style={styles.beltBadge}
+                contentFit="contain"
+              />
+            )}
+          </View>
           <Image
             source={{ uri: getWrestlerImage(item.imageUri) }}
             style={styles.wrestlerImage}
             contentFit="cover"
             transition={500}
           />
-
-          {/* 2. HEADER: RATING (Arriba Izquierda) */}
-          <View style={styles.cardHeaderOverlay}>
-            <View style={styles.ratingContainer}>
-              <Text style={styles.ratingNumber}>{item.ringLevel}</Text>
-              <Text style={styles.ratingLabel}>OVR</Text>
-            </View>
-            {/* ICONOS (Arriba Derecha) */}
-            <View style={styles.statusIcons}>
-              {hasTitle && <Ionicons name="trophy" size={14} color="#F59E0B" />}
-            </View>
-          </View>
-
-          {/* 3. FOOTER: NOMBRE (Abajo, con fondo oscuro para leerse bien) */}
           <LinearGradient
             colors={["transparent", "rgba(0,0,0,0.9)", "#000"] as any}
             style={styles.cardFooter}
@@ -367,21 +405,23 @@ export default function LockerRoomScreen() {
                 {item.crowd.toUpperCase()}
               </Text>
               <Text style={styles.statDivider}>•</Text>
-              <Text style={styles.statText}>
-                {item.mainClass.toUpperCase()}
+              <Text style={[styles.statText, { color: "#FFF" }]}>
+                {item.mainClass ? item.mainClass.toUpperCase() : "WRESTLER"}
               </Text>
             </View>
+            <Text style={styles.recordText}>
+              {item.normalWins || 0}W - {item.normalLosses || 0}L
+            </Text>
           </LinearGradient>
         </LinearGradient>
       </TouchableOpacity>
     );
   };
 
-  // ... (renderTitleCard y renderRivalryCard se mantienen igual por brevedad, o puedes usar los anteriores)
   const renderTitleCard = ({ item }: { item: any }) => {
     const holder1 = roster.find((l) => l.id === item.holderId1);
     const holder2 = roster.find((l) => l.id === item.holderId2);
-    const titleImageUri = getTitleImage(item);
+    const titleImageUri = getTitleImage(item) ?? "";
 
     return (
       <TouchableOpacity
@@ -399,7 +439,7 @@ export default function LockerRoomScreen() {
           </View>
           <View style={styles.titleInfo}>
             <Text style={styles.titleName}>{item.name}</Text>
-            <View style={styles.holderRow}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {holder1 ? (
                 <View style={styles.holderChip}>
                   <Image
@@ -413,9 +453,7 @@ export default function LockerRoomScreen() {
                 <Text style={styles.vacantText}>VACANT</Text>
               )}
               {holder2 && (
-                <View
-                  style={[styles.holderChip, { marginLeft: -10, zIndex: -1 }]}
-                >
+                <View style={styles.holderChip}>
                   <Image
                     source={{ uri: getWrestlerImage(holder2.imageUri) }}
                     style={styles.holderAvatar}
@@ -432,10 +470,152 @@ export default function LockerRoomScreen() {
     );
   };
 
-  const renderRivalryCard = ({ item }: { item: any }) => {
-    const r1 = roster.find((r) => r.id === item.luchador_id1);
-    const r2 = roster.find((r) => r.id === item.luchador_id2);
-    if (!r1 || !r2) return null;
+  // --- RENDERIZADOR ESPECÍFICO PARA EL ARCHIVO (ACORDEÓN) ---
+  const renderArchivedRivalryCard = ({ item }: { item: any }) => {
+    const r1Name =
+      roster.find((r) => r.id === item.luchador_id1)?.name || item.name1;
+    const r2Name =
+      roster.find((r) => r.id === item.luchador_id2)?.name || item.name2;
+    const r1Img =
+      roster.find((r) => r.id === item.luchador_id1)?.imageUri || item.image1;
+    const r2Img =
+      roster.find((r) => r.id === item.luchador_id2)?.imageUri || item.image2;
+
+    if (!r1Name || !r2Name) return null;
+
+    const isExpanded = expandedRivalryId === item.id;
+
+    return (
+      <View style={styles.rivalryCard}>
+        <TouchableOpacity
+          style={{ overflow: "hidden", borderRadius: 20 }}
+          activeOpacity={0.8}
+          onPress={() => toggleArchiveExpand(item)}
+        >
+          <BlurView intensity={10} tint="dark" style={styles.rivalryBlur}>
+            <View style={styles.rivalSide}>
+              <Image
+                source={{ uri: getWrestlerImage(r1Img) }}
+                style={[styles.rivalAvatar, { borderColor: "#3B82F6" }]}
+                contentFit="cover"
+              />
+              <Text style={styles.rivalName} numberOfLines={1}>
+                {r1Name}
+              </Text>
+            </View>
+            <View style={styles.rivalCenter}>
+              <Text style={styles.vsText}>VS</Text>
+              <Text
+                style={{
+                  color: "#64748B",
+                  fontSize: 10,
+                  fontWeight: "bold",
+                  marginTop: 5,
+                }}
+              >
+                ARCHIVED
+              </Text>
+              <Ionicons
+                name={isExpanded ? "chevron-up" : "chevron-down"}
+                size={16}
+                color="#64748B"
+                style={{ marginTop: 5 }}
+              />
+            </View>
+            <View style={styles.rivalSide}>
+              <Image
+                source={{ uri: getWrestlerImage(r2Img) }}
+                style={[styles.rivalAvatar, { borderColor: "#EF4444" }]}
+                contentFit="cover"
+              />
+              <Text style={styles.rivalName} numberOfLines={1}>
+                {r2Name}
+              </Text>
+            </View>
+          </BlurView>
+        </TouchableOpacity>
+
+        {/* EXPANDED CONTENT (INLINE LOGBOOK) */}
+        {isExpanded && (
+          <View style={styles.inlineLogbook}>
+            {expandedHistory.length === 0 ? (
+              <Text
+                style={{
+                  color: "#666",
+                  textAlign: "center",
+                  fontStyle: "italic",
+                  fontSize: 12,
+                }}
+              >
+                No matches found.
+              </Text>
+            ) : (
+              expandedHistory.map((match, idx) => (
+                <View key={idx} style={styles.inlineLogRow}>
+                  <Text style={styles.inlineLogWeek}>W{match.week}</Text>
+                  <View style={{ flex: 1, paddingHorizontal: 10 }}>
+                    {match.winnerName === "N/A" ? (
+                      <Text
+                        style={{
+                          color: "#D946EF",
+                          fontWeight: "bold",
+                          fontSize: 12,
+                        }}
+                      >
+                        ✨ Segment
+                      </Text>
+                    ) : (
+                      <Text style={{ color: "#FFF", fontSize: 12 }}>
+                        Winner:{" "}
+                        <Text style={{ fontWeight: "bold" }}>
+                          {match.winnerName}
+                        </Text>
+                      </Text>
+                    )}
+                    <Text style={{ color: "#64748B", fontSize: 10 }}>
+                      {match.matchType}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 2,
+                    }}
+                  >
+                    <Ionicons name="star" size={10} color="#F59E0B" />
+                    <Text
+                      style={{
+                        color: "#F59E0B",
+                        fontSize: 12,
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {match.rating}
+                    </Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // --- RENDERIZADOR PARA LISTA PRINCIPAL (MODAL) ---
+  const renderActiveRivalryCard = ({ item }: { item: any }) => {
+    const r1Name =
+      roster.find((r) => r.id === item.luchador_id1)?.name || item.name1;
+    const r2Name =
+      roster.find((r) => r.id === item.luchador_id2)?.name || item.name2;
+    const r1Img =
+      roster.find((r) => r.id === item.luchador_id1)?.imageUri || item.image1;
+    const r2Img =
+      roster.find((r) => r.id === item.luchador_id2)?.imageUri || item.image2;
+
+    if (!r1Name || !r2Name) return null;
+
     const heatLevel = item.calculatedHeat || item.level || 1;
     let heatColor = "#3B82F6";
     let heatLabel = "DULL";
@@ -462,15 +642,12 @@ export default function LockerRoomScreen() {
         <BlurView intensity={20} tint="dark" style={styles.rivalryBlur}>
           <View style={styles.rivalSide}>
             <Image
-              source={{ uri: getWrestlerImage(r1.imageUri) }}
-              style={[
-                styles.rivalAvatar,
-                { borderColor: r1.crowd === "Face" ? "#3B82F6" : "#EF4444" },
-              ]}
+              source={{ uri: getWrestlerImage(r1Img) }}
+              style={[styles.rivalAvatar, { borderColor: "#3B82F6" }]}
               contentFit="cover"
             />
             <Text style={styles.rivalName} numberOfLines={1}>
-              {r1.name}
+              {r1Name}
             </Text>
           </View>
           <View style={styles.rivalCenter}>
@@ -492,23 +669,14 @@ export default function LockerRoomScreen() {
           </View>
           <View style={styles.rivalSide}>
             <Image
-              source={{ uri: getWrestlerImage(r2.imageUri) }}
-              style={[
-                styles.rivalAvatar,
-                { borderColor: r2.crowd === "Face" ? "#3B82F6" : "#EF4444" },
-              ]}
+              source={{ uri: getWrestlerImage(r2Img) }}
+              style={[styles.rivalAvatar, { borderColor: "#EF4444" }]}
               contentFit="cover"
             />
             <Text style={styles.rivalName} numberOfLines={1}>
-              {r2.name}
+              {r2Name}
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.deleteRivalryBtn}
-            onPress={() => handleDeleteRivalry(item.id)}
-          >
-            <Ionicons name="archive-outline" size={16} color="#64748B" />
-          </TouchableOpacity>
         </BlurView>
       </TouchableOpacity>
     );
@@ -534,9 +702,16 @@ export default function LockerRoomScreen() {
               <Ionicons name="options" size={20} color="#FFF" />
             </TouchableOpacity>
           )}
+          {activeTab === "Rivalries" && (
+            <TouchableOpacity
+              onPress={() => setHistoryModalVisible(true)}
+              style={styles.filterBtn}
+            >
+              <Ionicons name="time-outline" size={22} color="#FFF" />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* SEARCH BAR */}
         {activeTab === "Talents" && (
           <View style={styles.searchContainer}>
             <Ionicons
@@ -590,7 +765,6 @@ export default function LockerRoomScreen() {
           </BlurView>
         </View>
 
-        {/* ACTIVE FILTERS (VISIBLE) */}
         {activeTab === "Talents" && renderActiveFilters()}
 
         {activeTab === "Talents" ? (
@@ -623,7 +797,7 @@ export default function LockerRoomScreen() {
             key="rivalries-list"
             data={rivalries}
             keyExtractor={(item) => item.id.toString()}
-            renderItem={renderRivalryCard}
+            renderItem={renderActiveRivalryCard}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
@@ -639,7 +813,7 @@ export default function LockerRoomScreen() {
           />
         )}
 
-        {/* FABs (Igual que antes) */}
+        {/* FABs */}
         {activeTab === "Talents" && (
           <TouchableOpacity
             style={styles.fab}
@@ -670,7 +844,7 @@ export default function LockerRoomScreen() {
         )}
       </SafeAreaView>
 
-      {/* FILTER MODAL (Igual que antes) */}
+      {/* FILTER MODAL */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -697,6 +871,34 @@ export default function LockerRoomScreen() {
                     selected={tempFilters.sortBy === opt.id}
                     onPress={() =>
                       setTempFilters({ ...tempFilters, sortBy: opt.id })
+                    }
+                    theme={brandTheme}
+                  />
+                ))}
+              </View>
+              <Text style={styles.filterLabel}>Gender</Text>
+              <View style={styles.chipRow}>
+                {GENDER_OPTIONS.map((opt) => (
+                  <FilterChip
+                    key={opt}
+                    label={opt}
+                    selected={tempFilters.gender === opt}
+                    onPress={() =>
+                      setTempFilters({ ...tempFilters, gender: opt })
+                    }
+                    theme={brandTheme}
+                  />
+                ))}
+              </View>
+              <Text style={styles.filterLabel}>Status</Text>
+              <View style={styles.chipRow}>
+                {STATUS_OPTIONS.map((opt) => (
+                  <FilterChip
+                    key={opt}
+                    label={opt}
+                    selected={tempFilters.status === opt}
+                    onPress={() =>
+                      setTempFilters({ ...tempFilters, status: opt })
                     }
                     theme={brandTheme}
                   />
@@ -732,7 +934,7 @@ export default function LockerRoomScreen() {
         </BlurView>
       </Modal>
 
-      {/* NEW RIVALRY MODAL (Igual) */}
+      {/* NEW RIVALRY MODAL */}
       <Modal
         visible={rivalryModalVisible}
         animationType="slide"
@@ -834,113 +1036,170 @@ export default function LockerRoomScreen() {
         </View>
       </Modal>
 
-      {/* RIVALRY HISTORY MODAL (Igual) */}
+      {/* RIVALRY HISTORY (ARCHIVE) MODAL */}
       <Modal
-        visible={rivalryDetailVisible}
+        visible={historyModalVisible}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setRivalryDetailVisible(false)}
+        onRequestClose={() => setHistoryModalVisible(false)}
       >
         <View style={{ flex: 1, backgroundColor: "#000" }}>
           <View style={styles.detailHeader}>
-            <Text style={styles.detailTitle}>RIVALRY LOGBOOK</Text>
-            <TouchableOpacity onPress={() => setRivalryDetailVisible(false)}>
+            <Text style={styles.detailTitle}>RIVALRY ARCHIVE</Text>
+            <TouchableOpacity onPress={() => setHistoryModalVisible(false)}>
               <Ionicons name="close-circle" size={30} color="#64748B" />
             </TouchableOpacity>
           </View>
-          <View style={styles.detailVsHeader}>
-            <View style={{ alignItems: "center" }}>
-              <Image
-                source={{
-                  uri: getWrestlerImage(selectedRivalryData?.r1?.imageUri),
-                }}
-                style={styles.detailAvatar}
-                contentFit="cover"
-                transition={500}
-              />
-              <Text style={styles.detailName}>
-                {selectedRivalryData?.r1?.name}
-              </Text>
+          <FlatList
+            data={pastRivalries}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={renderArchivedRivalryCard}
+            contentContainerStyle={{ padding: 20 }}
+            ListEmptyComponent={
+              <View style={{ alignItems: "center", marginTop: 50 }}>
+                <Text style={{ color: "#666" }}>No past rivalries found.</Text>
+              </View>
+            }
+          />
+        </View>
+      </Modal>
+
+      {/* RIVALRY DETAIL MODAL (LOGBOOK - ACTIVOS) */}
+      <Modal
+        visible={rivalryDetailVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setRivalryDetailVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.95)" }}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <View style={styles.detailHeader}>
+              <Text style={styles.detailTitle}>RIVALRY LOGBOOK</Text>
+              <TouchableOpacity onPress={() => setRivalryDetailVisible(false)}>
+                <Ionicons name="close-circle" size={30} color="#64748B" />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.detailVsText}>VS</Text>
-            <View style={{ alignItems: "center" }}>
-              <Image
-                source={{
-                  uri: getWrestlerImage(selectedRivalryData?.r2?.imageUri),
-                }}
-                style={styles.detailAvatar}
-                contentFit="cover"
-                transition={500}
-              />
-              <Text style={styles.detailName}>
-                {selectedRivalryData?.r2?.name}
-              </Text>
+            <View style={styles.detailVsHeader}>
+              <View style={{ alignItems: "center" }}>
+                <Image
+                  source={{
+                    uri: getWrestlerImage(selectedRivalryData?.r1?.imageUri),
+                  }}
+                  style={styles.detailAvatar}
+                  contentFit="cover"
+                  transition={500}
+                />
+                <Text style={styles.detailName}>
+                  {selectedRivalryData?.r1?.name}
+                </Text>
+              </View>
+              <Text style={styles.detailVsText}>VS</Text>
+              <View style={{ alignItems: "center" }}>
+                <Image
+                  source={{
+                    uri: getWrestlerImage(selectedRivalryData?.r2?.imageUri),
+                  }}
+                  style={styles.detailAvatar}
+                  contentFit="cover"
+                  transition={500}
+                />
+                <Text style={styles.detailName}>
+                  {selectedRivalryData?.r2?.name}
+                </Text>
+              </View>
             </View>
-          </View>
-          <ScrollView contentContainerStyle={{ padding: 20 }}>
-            <Text style={styles.sectionHeader}>MATCH HISTORY</Text>
-            {rivalryHistory.length === 0 ? (
-              <Text
-                style={{
-                  color: "#64748B",
-                  textAlign: "center",
-                  marginTop: 20,
-                  fontStyle: "italic",
-                }}
-              >
-                No matches recorded yet.
-              </Text>
-            ) : (
-              rivalryHistory.map((match, idx) => (
-                <View key={match.id} style={styles.historyItem}>
-                  <View style={styles.historyLeft}>
-                    <Text style={styles.historyWeek}>WK {match.week}</Text>
-                  </View>
-                  <BlurView
-                    intensity={10}
-                    tint="dark"
-                    style={styles.historyCard}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                      }}
+            <ScrollView
+              contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
+            >
+              <Text style={styles.sectionHeader}>MATCH HISTORY</Text>
+              {rivalryHistory.length === 0 ? (
+                <Text
+                  style={{
+                    color: "#64748B",
+                    textAlign: "center",
+                    marginTop: 20,
+                    fontStyle: "italic",
+                  }}
+                >
+                  No matches recorded yet.
+                </Text>
+              ) : (
+                rivalryHistory.map((match, idx) => (
+                  <View key={match.id} style={styles.historyItem}>
+                    <View style={styles.historyLeft}>
+                      <Text style={styles.historyWeek}>WK {match.week}</Text>
+                    </View>
+                    <BlurView
+                      intensity={10}
+                      tint="dark"
+                      style={styles.historyCard}
                     >
-                      <Text style={styles.historyWinner}>
-                        Winner:{" "}
-                        <Text style={{ color: "#FFF" }}>
-                          {match.winnerName}
-                        </Text>
-                      </Text>
                       <View
                         style={{
                           flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
+                          justifyContent: "space-between",
                         }}
                       >
-                        <Ionicons name="star" size={12} color="#F59E0B" />
-                        <Text
+                        {match.winnerName === "N/A" ? (
+                          <Text
+                            style={[styles.historyWinner, { color: "#D946EF" }]}
+                          >
+                            ✨ Segment
+                          </Text>
+                        ) : (
+                          <Text style={styles.historyWinner}>
+                            Winner:{" "}
+                            <Text style={{ color: "#FFF" }}>
+                              {match.winnerName}
+                            </Text>
+                          </Text>
+                        )}
+                        <View
                           style={{
-                            color: "#F59E0B",
-                            fontWeight: "bold",
-                            fontSize: 12,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 4,
                           }}
                         >
-                          {match.rating}
-                        </Text>
+                          <Ionicons name="star" size={12} color="#F59E0B" />
+                          <Text
+                            style={{
+                              color: "#F59E0B",
+                              fontWeight: "bold",
+                              fontSize: 12,
+                            }}
+                          >
+                            {match.rating}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                    <Text style={styles.historyType}>
-                      {match.matchType} •{" "}
-                      {match.titleName ? "Title Match" : "Normal"}
-                    </Text>
-                  </BlurView>
-                </View>
-              ))
-            )}
-          </ScrollView>
+                      <Text style={styles.historyType}>
+                        {match.matchType} •{" "}
+                        {match.titleName ? "Title Match" : "Normal"}
+                      </Text>
+                    </BlurView>
+                  </View>
+                ))
+              )}
+              {selectedRivalryData?.is_active === 1 && (
+                <TouchableOpacity
+                  style={styles.endRivalryBtn}
+                  onPress={() => {
+                    if (selectedRivalryData)
+                      handleDeleteRivalry(selectedRivalryData.id);
+                  }}
+                >
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={20}
+                    color="#FFF"
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.endRivalryText}>END RIVALRY</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </SafeAreaView>
         </View>
       </Modal>
     </View>
@@ -986,9 +1245,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
+    marginLeft: 8,
   },
 
-  // SEARCH
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1003,24 +1262,19 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: "white", fontSize: 14, fontWeight: "600" },
 
-  // ACTIVE FILTERS
-  activeFiltersContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 15,
-    alignItems: "center",
-  },
+  activeFiltersContainer: { paddingHorizontal: 20, marginBottom: 20 },
   clearAllBadge: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#EF4444",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 30,
     marginRight: 8,
   },
   clearAllText: {
     color: "white",
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "bold",
     marginRight: 4,
   },
@@ -1028,16 +1282,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.1)",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 30,
     marginRight: 8,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
   },
   activeBadgeText: {
-    color: "#CBD5E1",
-    fontSize: 10,
+    color: "#FFF",
+    fontSize: 12,
     fontWeight: "600",
     marginRight: 4,
   },
@@ -1061,36 +1315,20 @@ const styles = StyleSheet.create({
 
   listContent: { paddingHorizontal: 20, paddingBottom: 150 },
 
-  // --- NEW CARD STYLES (FUT-Inspired) ---
   cardContainer: {
     width: CARD_WIDTH,
-    height: 240, // Un poco más alta para mejor proporción
+    height: 250,
     marginBottom: 20,
-    borderRadius: 12,
-    // Sombra para dar profundidad
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#111",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.5,
     shadowRadius: 5,
-    elevation: 6,
+    elevation: 5,
   },
-  cardBackground: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: "hidden", // CLAVE: Que la imagen no se salga
-    position: "relative", // Para que los hijos absolutos se guíen por esto
-  },
-
-  // Imagen llenando la tarjeta pero empezando un poco más abajo
-  wrestlerImage: {
-    width: "110%", // Un poco más grande para efecto zoom
-    height: "110%",
-    position: "absolute",
-    bottom: -10, // Ajuste para que la cara quede centrada
-    left: -5,
-  },
-
-  // Header (Rating)
+  cardBackground: { flex: 1, position: "relative" },
   cardHeaderOverlay: {
     position: "absolute",
     top: 0,
@@ -1099,11 +1337,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     padding: 10,
-    zIndex: 10, // Asegura que esté encima de la imagen
+    zIndex: 10,
   },
   ratingContainer: {
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.4)", // Fondo sutil para contraste
+    backgroundColor: "rgba(0,0,0,0.5)",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -1112,7 +1350,6 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 20,
     fontWeight: "900",
-    lineHeight: 22,
     textShadowColor: "rgba(0,0,0,0.8)",
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
@@ -1123,20 +1360,30 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: -2,
   },
-  statusIcons: {
-    justifyContent: "flex-start",
+  beltBadge: {
+    width: 45,
+    height: 35,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.8,
+    shadowRadius: 3,
   },
-
-  // Footer (Nombre) - PEGADO ABAJO
+  wrestlerImage: {
+    width: "115%",
+    height: "115%",
+    position: "absolute",
+    bottom: -15,
+    left: -10,
+  },
   cardFooter: {
-    position: "absolute", // ESTO ARREGLA EL PROBLEMA
-    bottom: -1,
+    position: "absolute",
+    bottom: -2,
     left: 0,
     right: 0,
-    paddingHorizontal: 10,
-    paddingBottom: 12,
-    paddingTop: 30, // Espacio para el gradiente transparente
+    padding: 10,
+    paddingTop: 35,
     justifyContent: "flex-end",
+    alignItems: "center",
   },
   wrestlerName: {
     color: "white",
@@ -1146,24 +1393,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textShadowColor: "rgba(0,0,0,1)",
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    textShadowRadius: 4,
+    textAlign: "center",
   },
-  statsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  statText: {
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  statDivider: {
-    fontSize: 9,
-    color: "#64748B",
-    marginHorizontal: 5,
+  statsRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
+  statText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.5 },
+  statDivider: { fontSize: 9, color: "#64748B", marginHorizontal: 5 },
+  recordText: {
+    color: "#CBD5E1",
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 4,
   },
 
-  // --- TITLE CARD STYLES ---
   titleCardContainer: {
     marginBottom: 15,
     borderRadius: 20,
@@ -1192,20 +1434,26 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginBottom: 10,
   },
-  holderRow: { flexDirection: "row", alignItems: "center" },
+  holderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
   holderChip: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.15)",
     padding: 4,
-    paddingRight: 12,
+    paddingRight: 10,
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
   holderAvatar: { width: 24, height: 24, borderRadius: 12, marginRight: 8 },
   holderName: { color: "white", fontSize: 12, fontWeight: "700" },
   vacantText: { color: "#64748B", fontSize: 12, fontStyle: "italic" },
 
-  // --- RIVALRY STYLES ---
   rivalryCard: { marginBottom: 15, borderRadius: 20, overflow: "hidden" },
   rivalryBlur: {
     flexDirection: "row",
@@ -1248,6 +1496,21 @@ const styles = StyleSheet.create({
   heatMeterFill: { height: "100%", borderRadius: 3 },
   heatText: { fontSize: 10, fontWeight: "800", letterSpacing: 1 },
   deleteRivalryBtn: { position: "absolute", top: 10, right: 10, padding: 5 },
+
+  // INLINE LOGBOOK STYLES
+  inlineLogbook: {
+    backgroundColor: "rgba(0,0,0,0.3)",
+    padding: 15,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  inlineLogRow: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  inlineLogWeek: {
+    color: "#64748B",
+    fontWeight: "900",
+    fontSize: 10,
+    width: 30,
+  },
 
   emptyState: { alignItems: "center", marginTop: 50 },
   emptyText: { color: "rgba(255,255,255,0.3)", marginTop: 10, fontSize: 14 },
@@ -1395,4 +1658,22 @@ const styles = StyleSheet.create({
   },
   historyWinner: { color: "#94A3B8", fontSize: 12, fontWeight: "bold" },
   historyType: { color: "#64748B", fontSize: 10, marginTop: 5 },
+
+  // NEW BUTTON STYLE
+  endRivalryBtn: {
+    backgroundColor: "#EF4444",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 15,
+    borderRadius: 12,
+    marginTop: 20,
+    marginBottom: 40,
+  },
+  endRivalryText: {
+    color: "#FFF",
+    fontWeight: "900",
+    fontSize: 14,
+    letterSpacing: 1,
+  },
 });
