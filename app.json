@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "MyGM Evolution v2",
-    "slug": "mygm-v2",
+    "name": "MyGM Evolution v2.1",
+    "slug": "mygm-v2.1",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",

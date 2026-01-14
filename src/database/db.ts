@@ -213,6 +213,16 @@ export const initDatabase = () => {
       // Ignorar si ya existe
     }
 
+    // 3. 🚨 MIGRACIÓN NUEVA: rating en planned_matches
+    try {
+      db.execSync(
+        `ALTER TABLE planned_matches ADD COLUMN rating INTEGER DEFAULT 0;`
+      );
+      console.log("✅ Migración aplicada: rating agregada a planned_matches.");
+    } catch (e) {
+      // Ignorar si ya existe (error code 1: duplicate column name)
+    }
+
     console.log(
       "✅ Base de datos Evolution (v2.0) inicializada correctamente."
     );

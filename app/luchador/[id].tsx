@@ -1,6 +1,6 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import { Image } from "expo-image"; // USAMOS EXPO IMAGE
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   useFocusEffect,
@@ -29,15 +29,12 @@ import {
   deleteLuchador,
   getAllTitles,
   getLuchadorById,
+  getLuchadorTitleHistory,
   renewContract,
 } from "../../src/database/operations";
-
-// --- IMPORTAR EL HELPER DE IMÁGENES DE LUCHADORES ---
 import { getWrestlerImage } from "../../src/utils/imageHelper";
 
 const { width } = Dimensions.get("window");
-
-// --- URL BASE PARA TÍTULOS ---
 const TITLES_REPO_URL =
   "https://raw.githubusercontent.com/eldeiivid/wwe-mymg-assets/main/titles/";
 
@@ -45,12 +42,13 @@ export default function LuchadorDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const navigation = useNavigation();
-  const { saveId, brandTheme } = useGame();
+  const { saveId } = useGame();
 
   const [luchador, setLuchador] = useState<any | null>(null);
-  const [titles, setTitles] = useState<any[]>([]);
+  const [currentTitles, setCurrentTitles] = useState<any[]>([]);
+  const [pastTitles, setPastTitles] = useState<any[]>([]);
 
-  // ESTADOS MODAL
+  // MODAL STATES
   const [renewModalVisible, setRenewModalVisible] = useState(false);
   const [renewWeeks, setRenewWeeks] = useState("10");
   const [renewCost, setRenewCost] = useState("0");
@@ -59,41 +57,30 @@ export default function LuchadorDetailScreen() {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // --- HELPER PARA IMAGEN DE TÍTULO ---
+  // HELPER IMAGENES
   const getTitleImage = (title: any) => {
     if (!title) return undefined;
-
-    // 1. PRIORIDAD: DB
-    if (title.imageUri && title.imageUri !== "") {
+    if (title.imageUri && title.imageUri !== "")
       return `${TITLES_REPO_URL}${title.imageUri}`;
-    }
 
-    // 2. FALLBACK
     const gender = title.gender === "Female" ? "female" : "male";
-    if (
-      title.isMITB === 1 ||
-      title.name.includes("MITB") ||
-      title.name.includes("Briefcase")
-    ) {
+    if (title.isMITB === 1 || title.name?.includes("MITB")) {
       return `${TITLES_REPO_URL}${gender}-moneyinthebank.png`;
     }
 
     let brand = "raw";
-    const nameLower = title.name.toLowerCase();
-    if (nameLower.includes("smackdown") || nameLower.includes("universal"))
-      brand = "smackdown";
+    const nameLower = title.name?.toLowerCase() || "";
+    if (nameLower.includes("smackdown")) brand = "smackdown";
     else if (nameLower.includes("nxt")) brand = "nxt";
     else if (nameLower.includes("aew")) brand = "aew";
 
     let division = "world";
-    const cat = title.category || title.type || "";
-    if (cat === "Midcard") division = "midcard";
-    else if (cat === "Tag") division = "tagteam";
+    if (title.category === "Midcard") division = "midcard";
+    else if (title.category === "Tag") division = "tagteam";
 
     if (division === "tagteam" && gender === "female") {
       return `${TITLES_REPO_URL}female-tagteam.webp`;
     }
-
     return `${TITLES_REPO_URL}${brand}-${gender}-${division}.webp`;
   };
 
@@ -103,10 +90,30 @@ export default function LuchadorDetailScreen() {
       setLuchador(data);
 
       const allTitles = getAllTitles(saveId);
-      const activeTitles = allTitles.filter(
+      const active = allTitles.filter(
         (t: any) => t.holderId1 === Number(id) || t.holderId2 === Number(id)
       );
-      setTitles(activeTitles);
+      setCurrentTitles(active);
+
+      let history: any[] = [];
+      try {
+        history = getLuchadorTitleHistory(saveId, Number(id));
+      } catch (e) {
+        console.log("Error cargando historial");
+      }
+
+      const currentAsHistory = active.map((t: any) => ({
+        id: `curr-${t.id}`,
+        titleName: t.name,
+        imageUri: t.imageUri,
+        category: t.category,
+        gender: t.gender,
+        isMITB: t.isMITB,
+        weekWon: t.weekWon,
+        weekLost: null,
+      }));
+
+      setPastTitles([...currentAsHistory, ...history]);
     }
   };
 
@@ -117,56 +124,44 @@ export default function LuchadorDetailScreen() {
   );
 
   const handleDelete = () => {
-    Alert.alert(
-      "¿Despedir Luchador?",
-      "Perderás sus estadísticas y contrato permanentemente.",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Despedir",
-          style: "destructive",
-          onPress: () => {
-            deleteLuchador(Number(id));
-            router.back();
-          },
+    Alert.alert("¿Despedir?", "Esta acción es irreversible.", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Despedir",
+        style: "destructive",
+        onPress: () => {
+          deleteLuchador(Number(id));
+          router.back();
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleOpenRenew = () => {
-    const suggestedCost = Math.floor((luchador.hiringCost || 10000) * 0.1);
-    setRenewCost(suggestedCost.toString());
+    const suggested = Math.floor((luchador.hiringCost || 10000) * 0.1);
+    setRenewCost(suggested.toString());
     setRenewWeeks("10");
     setRenewModalVisible(true);
   };
 
   const submitRenewal = () => {
     if (!saveId) return;
-
     const cost = parseInt(renewCost) || 0;
     const weeks = parseInt(renewWeeks) || 0;
-
-    if (weeks <= 0) {
-      Alert.alert("Error", "Debes añadir al menos 1 semana.");
-      return;
-    }
+    if (weeks <= 0) return Alert.alert("Error", "Mínimo 1 semana.");
 
     Alert.alert(
-      "Confirmar Trato",
-      `Pagar $${cost.toLocaleString()} por ${weeks} semanas adicionales.`,
+      "Confirmar",
+      `Pagar $${cost.toLocaleString()} por ${weeks} semanas?`,
       [
         { text: "Cancelar", style: "cancel" },
         {
-          text: "Firmar Contrato",
+          text: "Firmar",
           onPress: () => {
-            const success = renewContract(saveId, Number(id), cost, weeks);
-            if (success) {
+            if (renewContract(saveId, Number(id), cost, weeks)) {
               setRenewModalVisible(false);
               loadData();
-              Alert.alert("Éxito", "Renovación completada.");
-            } else {
-              Alert.alert("Error", "No se pudo procesar la renovación.");
+              Alert.alert("Éxito", "Contrato renovado.");
             }
           },
         },
@@ -176,513 +171,367 @@ export default function LuchadorDetailScreen() {
 
   if (!luchador) return null;
 
-  const isExpired = luchador.isDraft === 0 && luchador.weeksLeft <= 0;
-  const isExpiring = luchador.isDraft === 0 && luchador.weeksLeft <= 5;
   const isHeel = luchador.crowd === "Heel";
-  const alignColor = isHeel ? "#EF4444" : "#3B82F6";
+  // Colores base (Un poco más oscuros para dar elegancia)
+  const primaryColor = isHeel ? "#7f1d1d" : "#1e3a8a";
+  const accentColor = isHeel ? "#EF4444" : "#3B82F6";
 
-  // Formato para clases múltiples
-  const classDisplayText =
-    luchador.altClass && luchador.altClass !== "None"
-      ? `${luchador.mainClass} • ${luchador.altClass}`
-      : luchador.mainClass;
-
-  // --- COMPONENTES AUXILIARES ---
-  const StatBar = ({ label, value, color, icon, max = 100 }: any) => {
-    const percentage = Math.min((value / max) * 100, 100);
-
-    return (
-      <View style={styles.statRow}>
-        <View style={styles.statHeader}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Ionicons name={icon} size={14} color="#94A3B8" />
-            <Text style={styles.statLabel}>{label}</Text>
-          </View>
-          <Text style={[styles.statValue, { color }]}>
-            {value}
-            <Text style={{ fontSize: 10, color: "#64748B" }}>/{max}</Text>
-          </Text>
-        </View>
-        <View style={styles.progressBarBg}>
-          <LinearGradient
-            colors={[color, color + "80"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[styles.progressBarFill, { width: `${percentage}%` }]}
-          />
-        </View>
-      </View>
-    );
-  };
+  const wrestlerImageSource = luchador.imageUri
+    ? { uri: getWrestlerImage(luchador.imageUri) }
+    : null;
 
   return (
-    <View style={styles.mainContainer}>
+    <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* GLOBAL BACKGROUND */}
-      <View style={[styles.absoluteFill, { backgroundColor: "#000" }]} />
+      {/* 1. FONDO GENERAL */}
       <LinearGradient
-        colors={[alignColor, "transparent"]}
-        style={[styles.absoluteFill, { height: "60%", opacity: 0.2 }]}
+        colors={[primaryColor, "#000"]}
+        locations={[0, 0.5]} // El color principal solo llega hasta la mitad
+        style={styles.absoluteFill}
       />
 
       <SafeAreaView style={{ flex: 1 }}>
-        {/* HEADER NAVEGACION */}
-        <View style={styles.navHeader}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.iconBtn}
-          >
-            <Ionicons name="arrow-back" size={24} color="#FFF" />
-          </TouchableOpacity>
-          <Text style={styles.navTitle}>TALENT PROFILE</Text>
-          <TouchableOpacity
-            onPress={() =>
-              router.push({
-                pathname: "../luchador/edit/[id]",
-                params: { id: Number(id) },
-              })
-            }
-            style={styles.iconBtn}
-          >
-            <Ionicons name="pencil" size={20} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-
         <ScrollView
           contentContainerStyle={{ paddingBottom: 50 }}
           showsVerticalScrollIndicator={false}
         >
-          {/* BANNER DE ALERTA */}
-          {isExpired && (
-            <BlurView
-              intensity={40}
-              tint="dark"
-              style={[styles.expiredBanner, { borderColor: "#EF4444" }]}
+          {/* HEADER NAV */}
+          <View style={styles.navBar}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.iconBtn}
             >
-              <Ionicons name="warning" size={20} color="#EF4444" />
-              <Text style={[styles.expiredBannerText, { color: "#EF4444" }]}>
-                CONTRATO VENCIDO - ACCIÓN REQUERIDA
-              </Text>
-            </BlurView>
-          )}
+              <Ionicons name="chevron-back" size={28} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={() =>
+                router.push({
+                  pathname: "../luchador/edit/[id]",
+                  params: { id: Number(id) },
+                })
+              }
+            >
+              <MaterialCommunityIcons name="pencil" size={24} color="#FFF" />
+            </TouchableOpacity>
+          </View>
 
-          {/* --- HERO SECTION --- */}
-          <View style={styles.profileHeader}>
-            <View style={styles.avatarContainer}>
-              <LinearGradient
-                colors={[alignColor, "transparent"]}
-                style={styles.avatarGlow}
-              />
+          {/* 2. TOP CARD (HERO SECTION) */}
+          <View style={styles.heroContainer}>
+            {/* TEXTO DE FONDO (NOMBRE GIGANTE ATRAS DE TODO) */}
+            <Text
+              style={styles.bigBgText}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {luchador.name.split(" ").pop()?.toUpperCase()}
+            </Text>
 
-              {luchador.imageUri ? (
-                // --- 4. IMAGEN PRINCIPAL OPTIMIZADA ---
-                <Image
-                  source={{ uri: getWrestlerImage(luchador.imageUri) }}
-                  style={styles.avatarImage}
-                  contentFit="cover"
-                  transition={500}
-                />
+            {/* CONTENEDOR DE LA IMAGEN + MASCARA DE FUSIÓN */}
+            <View style={styles.imageWrapper}>
+              {wrestlerImageSource ? (
+                <>
+                  <Image
+                    source={wrestlerImageSource}
+                    style={styles.heroImage}
+                    contentFit="cover"
+                  />
+                  {/* --- ESTE ES EL SECRETO: GRADIENTE SUPERPUESTO PARA FUSIONAR --- */}
+                  <LinearGradient
+                    // De transparente arriba a NEGRO abajo (mismo color que el fondo de la app)
+                    colors={["transparent", "transparent", "#000"]}
+                    locations={[0, 0.7, 1]}
+                    style={StyleSheet.absoluteFill}
+                  />
+                </>
               ) : (
-                <View
-                  style={[
-                    styles.avatarPlaceholder,
-                    {
-                      backgroundColor: "rgba(255,255,255,0.1)",
-                      borderColor: alignColor,
-                    },
-                  ]}
-                >
-                  <Text style={styles.avatarText}>
-                    {luchador.name.charAt(0)}
+                <View style={styles.placeholderImage}>
+                  <Text
+                    style={{ fontSize: 80, color: "rgba(255,255,255,0.1)" }}
+                  >
+                    {luchador.name[0]}
                   </Text>
                 </View>
               )}
+            </View>
 
-              <BlurView intensity={30} tint="dark" style={styles.classBadge}>
-                <Text style={styles.classBadgeText}>{luchador.mainClass}</Text>
+            {/* INFO TEXT (Sobrepuesto a la izquierda) */}
+            <View style={styles.infoOverlay}>
+              <View
+                style={[styles.roleBadge, { backgroundColor: accentColor }]}
+              >
+                <Text style={styles.roleText}>
+                  {luchador.crowd.toUpperCase()}
+                </Text>
+              </View>
+              <Text style={styles.nameText}>{luchador.name.toUpperCase()}</Text>
+              <Text style={styles.classText}>
+                {luchador.mainClass.toUpperCase()}
+                {luchador.altClass && luchador.altClass !== "None"
+                  ? ` • ${luchador.altClass.toUpperCase()}`
+                  : ""}
+              </Text>
+            </View>
+
+            {/* OVR (Flotando a la derecha) */}
+            <View style={styles.ovrContainer}>
+              <BlurView intensity={30} tint="light" style={styles.ovrBlur}>
+                <Text style={styles.ovrNumber}>{luchador.ringLevel}</Text>
+                <Text style={styles.ovrLabel}>OVR</Text>
               </BlurView>
             </View>
-
-            <Text style={styles.name}>{luchador.name}</Text>
-
-            <View style={styles.subInfoRow}>
-              <View
-                style={[
-                  styles.miniBadge,
-                  {
-                    backgroundColor: alignColor + "20",
-                    borderColor: alignColor,
-                  },
-                ]}
-              >
-                <Text style={[styles.miniBadgeText, { color: alignColor }]}>
-                  {luchador.crowd}
-                </Text>
-              </View>
-
-              <Text style={styles.divider}>|</Text>
-
-              <Text style={styles.subInfoText}>
-                {classDisplayText.toUpperCase()}
-                <Text style={{ color: "#64748B" }}>
-                  {" "}
-                  • {luchador.gender.toUpperCase()}
-                </Text>
-              </Text>
-            </View>
-
-            {/* TÍTULOS ACTIVOS (AHORA CON IMÁGENES) */}
-            {titles.length > 0 && (
-              <View style={styles.titlesRow}>
-                {titles.map((t) => {
-                  const tImage = getTitleImage(t);
-                  return (
-                    <View key={t.id} style={styles.titleItem}>
-                      {tImage ? (
-                        <Image
-                          source={{ uri: tImage }}
-                          style={styles.titleImage}
-                          contentFit="contain"
-                        />
-                      ) : (
-                        // Fallback a texto si no hay imagen (por seguridad)
-                        <LinearGradient
-                          colors={
-                            t.isMITB
-                              ? ["#6366F1", "#4338CA"]
-                              : ["#F59E0B", "#B45309"]
-                          }
-                          style={styles.titlePill}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 0 }}
-                        >
-                          <Text style={styles.titlePillIcon}>
-                            {t.isMITB ? "💼" : "🏆"}
-                          </Text>
-                          <Text style={styles.titlePillText}>{t.name}</Text>
-                        </LinearGradient>
-                      )}
-                      {/* Si usamos imagen, mostramos el nombre abajo pequeño */}
-                      {tImage && (
-                        <Text style={styles.titleLabel} numberOfLines={1}>
-                          {t.name}
-                        </Text>
-                      )}
-                    </View>
-                  );
-                })}
-              </View>
-            )}
           </View>
 
-          {/* --- ESTADÍSTICAS (SIN POPULARIDAD) --- */}
-          <BlurView intensity={20} tint="dark" style={styles.glassCard}>
-            <Text style={styles.sectionTitle}>PERFORMANCE STATS</Text>
-            <StatBar
-              label="In-Ring Skill"
-              value={luchador.ringLevel}
-              max={25}
-              color="#10B981"
-              icon="fitness"
-            />
-            <StatBar
-              label="Mic Skill"
-              value={luchador.mic}
-              max={5}
-              color="#F59E0B"
-              icon="mic"
-            />
-          </BlurView>
-
-          {/* --- RÉCORD (GRID) --- */}
-          <View style={styles.recordRow}>
-            <BlurView
-              intensity={20}
-              tint="dark"
+          {/* 3. STATS GRID (MIC - WINS - LOSSES) */}
+          <View style={styles.statsRow}>
+            {/* MIC */}
+            <View
               style={[
-                styles.recordBox,
-                { borderColor: "rgba(16, 185, 129, 0.3)" },
+                styles.statItem,
+                { backgroundColor: "rgba(255,255,255,0.05)" },
               ]}
             >
-              <Text style={[styles.recordNum, { color: "#10B981" }]}>
+              <Text style={styles.statLabel}>MIC</Text>
+              <Text style={styles.statValue}>{luchador.mic}</Text>
+            </View>
+
+            {/* WINS (Verde) */}
+            <View
+              style={[
+                styles.statItem,
+                {
+                  backgroundColor: "rgba(16, 185, 129, 0.1)",
+                  borderColor: "rgba(16, 185, 129, 0.3)",
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              <Text style={[styles.statLabel, { color: "#10B981" }]}>WINS</Text>
+              <Text style={[styles.statValue, { color: "#10B981" }]}>
                 {luchador.normalWins}
               </Text>
-              <Text style={styles.recordLabel}>WINS</Text>
-            </BlurView>
+            </View>
 
-            <BlurView
-              intensity={20}
-              tint="dark"
+            {/* LOSSES (Rojo) */}
+            <View
               style={[
-                styles.recordBox,
-                { borderColor: "rgba(239, 68, 68, 0.3)" },
+                styles.statItem,
+                {
+                  backgroundColor: "rgba(239, 68, 68, 0.1)",
+                  borderColor: "rgba(239, 68, 68, 0.3)",
+                  borderWidth: 1,
+                },
               ]}
             >
-              <Text style={[styles.recordNum, { color: "#EF4444" }]}>
+              <Text style={[styles.statLabel, { color: "#EF4444" }]}>
+                LOSSES
+              </Text>
+              <Text style={[styles.statValue, { color: "#EF4444" }]}>
                 {luchador.normalLosses}
               </Text>
-              <Text style={styles.recordLabel}>LOSSES</Text>
-            </BlurView>
+            </View>
           </View>
 
-          {/* --- CONTRATO (GLASS CARD MEJORADO) --- */}
-          <BlurView
-            intensity={20}
-            tint="dark"
-            style={[
-              styles.glassCard,
-              (isExpired || isExpiring) && {
-                borderColor: "#EF4444",
-                borderWidth: 1,
-              },
-            ]}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 15,
-              }}
-            >
-              <Text style={styles.sectionTitle}>CONTRACT STATUS</Text>
-              {luchador.isDraft === 0 && (
-                <TouchableOpacity
-                  onPress={handleOpenRenew}
-                  style={{
-                    backgroundColor: "rgba(255,255,255,0.1)",
-                    paddingHorizontal: 10,
-                    paddingVertical: 4,
-                    borderRadius: 8,
-                  }}
+          {/* 4. SECCIONES DE CONTENIDO */}
+          <View style={styles.contentSection}>
+            {/* TITULOS ACTUALES */}
+            {currentTitles.length > 0 && (
+              <View style={styles.sectionBlock}>
+                <Text style={styles.sectionTitle}>CURRENT CHAMPION</Text>
+                <View style={styles.activeTitlesRow}>
+                  {currentTitles.map((t) => (
+                    <View key={t.id} style={styles.activeTitleCard}>
+                      <Image
+                        source={{ uri: getTitleImage(t) }}
+                        style={styles.activeTitleImg}
+                        contentFit="contain"
+                      />
+                      <Text style={styles.activeTitleName} numberOfLines={1}>
+                        {t.name}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* TROPHY ROOM */}
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionTitle}>TROPHY ROOM</Text>
+              {pastTitles.length === 0 ? (
+                <Text style={styles.emptyText}>
+                  No championships history yet.
+                </Text>
+              ) : (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 12 }}
                 >
-                  <Text
-                    style={{ color: "#FFF", fontSize: 10, fontWeight: "bold" }}
-                  >
-                    NEGOTIATE
-                  </Text>
-                </TouchableOpacity>
+                  {pastTitles.map((reign, idx) => {
+                    const isActive = reign.weekLost === null;
+                    return (
+                      <View
+                        key={idx}
+                        style={[
+                          styles.trophyCard,
+                          isActive && {
+                            borderColor: "#F59E0B",
+                            borderWidth: 1,
+                          },
+                        ]}
+                      >
+                        <Image
+                          source={{ uri: getTitleImage(reign) }}
+                          style={styles.trophyImg}
+                          contentFit="contain"
+                        />
+                        <View>
+                          <Text style={styles.trophyName} numberOfLines={1}>
+                            {reign.titleName}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.trophyDetail,
+                              isActive && {
+                                color: "#F59E0B",
+                                fontWeight: "bold",
+                              },
+                            ]}
+                          >
+                            {isActive
+                              ? "CURRENT REIGN"
+                              : `${
+                                  (reign.weekLost || 0) - (reign.weekWon || 0)
+                                } WEEKS`}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
               )}
             </View>
 
-            <View style={styles.infoRow}>
-              <View>
-                <Text style={styles.infoLabel}>Time Remaining</Text>
-                <Text
+            {/* CONTRACT */}
+            <View style={styles.contractBox}>
+              <View style={styles.contractHeader}>
+                <Ionicons
+                  name="document-text-outline"
+                  size={20}
+                  color="#94A3B8"
+                />
+                <Text style={styles.contractTitle}>CONTRACT STATUS</Text>
+              </View>
+
+              <View style={styles.contractDetails}>
+                <View>
+                  <Text style={styles.contractSubLabel}>TYPE</Text>
+                  <Text
+                    style={[
+                      styles.contractMainValue,
+                      { color: luchador.isDraft ? "#FFF" : "#F59E0B" },
+                    ]}
+                  >
+                    {luchador.isDraft === 1 ? "PERMANENT" : "TEMPORARY"}
+                  </Text>
+                </View>
+                <View>
+                  <Text style={styles.contractSubLabel}>TIME LEFT</Text>
+                  <Text
+                    style={[
+                      styles.contractMainValue,
+                      { color: luchador.weeksLeft < 5 ? "#EF4444" : "#FFF" },
+                    ]}
+                  >
+                    {luchador.isDraft === 1 ? "∞" : `${luchador.weeksLeft} WKS`}
+                  </Text>
+                </View>
+                <View>
+                  <Text style={styles.contractSubLabel}>SALARY</Text>
+                  <Text style={styles.contractMainValue}>
+                    ${luchador.hiringCost?.toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+
+              {/* BOTONES ACCION */}
+              <View style={styles.btnRow}>
+                {luchador.isDraft === 0 && (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: "#10B981" }]}
+                    onPress={handleOpenRenew}
+                  >
+                    <Text style={styles.btnText}>RENEW DEAL</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
                   style={[
-                    styles.infoValue,
+                    styles.actionBtn,
                     {
-                      color: isExpired
-                        ? "#EF4444"
-                        : isExpiring
-                        ? "#F59E0B"
-                        : "#FFF",
+                      backgroundColor: "rgba(239,68,68,0.2)",
+                      borderWidth: 1,
+                      borderColor: "#EF4444",
                     },
                   ]}
+                  onPress={handleDelete}
                 >
-                  {isExpired
-                    ? "EXPIRED"
-                    : luchador.isDraft === 1
-                    ? "PERMANENT DRAFT"
-                    : `${luchador.weeksLeft} Weeks`}
-                </Text>
-              </View>
-              <View style={{ alignItems: "flex-end" }}>
-                <Text style={styles.infoLabel}>Salary Cost</Text>
-                <Text style={styles.infoValue}>
-                  ${luchador.hiringCost?.toLocaleString()}
-                </Text>
-              </View>
-            </View>
-
-            {/* --- NUEVA BARRA DE CONTRATO VISUAL --- */}
-            <View style={{ marginTop: 15 }}>
-              {luchador.isDraft === 1 ? (
-                // CASO DRAFT PERMANENTE: Barra Dorada Infinita
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <View
-                    style={{
-                      flex: 1,
-                      height: 6,
-                      backgroundColor: "rgba(251, 191, 36, 0.2)",
-                      borderRadius: 3,
-                    }}
-                  >
-                    <LinearGradient
-                      colors={["#F59E0B", "#FBBF24"]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={{ width: "100%", height: "100%", borderRadius: 3 }}
-                    />
-                  </View>
-                  <Ionicons name="infinite" size={18} color="#FBBF24" />
-                </View>
-              ) : (
-                // CASO AGENTE LIBRE (TEMPORAL): Barra de "Gasolina"
-                <View>
-                  <View
-                    style={{
-                      height: 6,
-                      backgroundColor: "rgba(255,255,255,0.1)",
-                      borderRadius: 3,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <LinearGradient
-                      // Color dinámico según urgencia
-                      colors={
-                        luchador.weeksLeft <= 5
-                          ? ["#EF4444", "#B91C1C"] // Rojo
-                          : luchador.weeksLeft <= 12
-                          ? ["#F59E0B", "#D97706"] // Amarillo
-                          : ["#10B981", "#059669"] // Verde
-                      }
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={{
-                        // Calculamos %: Tope visual de 25 semanas. Si tiene más, se ve lleno.
-                        width: `${Math.min(
-                          (luchador.weeksLeft / 25) * 100,
-                          100
-                        )}%`,
-                        height: "100%",
-                      }}
-                    />
-                  </View>
-                  <Text
-                    style={{
-                      color: "#64748B",
-                      fontSize: 10,
-                      fontWeight: "600",
-                      marginTop: 6,
-                      textAlign: "right",
-                    }}
-                  >
-                    {luchador.weeksLeft <= 0
-                      ? "Needs Renewal"
-                      : luchador.weeksLeft <= 5
-                      ? "Expiring Soon"
-                      : "Contract Healthy"}
+                  <Text style={[styles.btnText, { color: "#EF4444" }]}>
+                    RELEASE
                   </Text>
-                </View>
-              )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </BlurView>
-
-          {/* --- BOTÓN PELIGRO --- */}
-          <TouchableOpacity style={styles.deleteLink} onPress={handleDelete}>
-            <Ionicons
-              name="trash-outline"
-              size={16}
-              color="#EF4444"
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles.deleteLinkText}>Release Talent</Text>
-          </TouchableOpacity>
+          </View>
         </ScrollView>
       </SafeAreaView>
 
-      {/* ================= MODAL NEGOCIACIÓN (DARK) ================= */}
-      <Modal
-        visible={renewModalVisible}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setRenewModalVisible(false)}
-      >
+      {/* MODAL RENOVAR */}
+      <Modal visible={renewModalVisible} animationType="fade" transparent>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.modalOverlay}
         >
           <BlurView intensity={95} tint="dark" style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Contract Negotiation</Text>
+            <Text style={styles.modalTitle}>Renew Contract</Text>
+            <View style={{ gap: 15, marginVertical: 20 }}>
+              <View>
+                <Text style={styles.inputLabel}>Weeks to Add</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={renewWeeks}
+                  onChangeText={setRenewWeeks}
+                />
+              </View>
+              <View>
+                <Text style={styles.inputLabel}>Bonus Cost ($)</Text>
+                <TextInput
+                  style={[styles.input, { color: "#10B981" }]}
+                  keyboardType="numeric"
+                  value={renewCost}
+                  onChangeText={setRenewCost}
+                />
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
               <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: "#333" }]}
                 onPress={() => setRenewModalVisible(false)}
-                style={styles.closeBtn}
               >
-                <Ionicons name="close" size={20} color="#FFF" />
+                <Text style={styles.modalBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalBtn,
+                  { backgroundColor: accentColor, flex: 1 },
+                ]}
+                onPress={submitRenewal}
+              >
+                <Text style={styles.modalBtnText}>Sign Deal</Text>
               </TouchableOpacity>
             </View>
-
-            <View style={{ alignItems: "center", marginBottom: 20 }}>
-              <View style={{ marginBottom: 10 }}>
-                {luchador.imageUri ? (
-                  // --- 5. IMAGEN EN MODAL OPTIMIZADA ---
-                  <Image
-                    source={{ uri: getWrestlerImage(luchador.imageUri) }}
-                    style={{ width: 50, height: 50, borderRadius: 25 }}
-                    contentFit="cover"
-                    transition={500}
-                  />
-                ) : (
-                  <View
-                    style={{
-                      width: 50,
-                      height: 50,
-                      borderRadius: 25,
-                      backgroundColor: "#333",
-                      justifyContent: "center",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text style={{ color: "#FFF", fontWeight: "bold" }}>
-                      {luchador.name.charAt(0)}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <Text style={{ color: "#94A3B8", fontSize: 14 }}>
-                Offering extension to{" "}
-                <Text style={{ color: "#FFF", fontWeight: "bold" }}>
-                  {luchador.name}
-                </Text>
-              </Text>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Additional Weeks</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={renewWeeks}
-                onChangeText={setRenewWeeks}
-                placeholderTextColor="#666"
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Signing Bonus ($)</Text>
-              <TextInput
-                style={[styles.input, { color: "#10B981" }]}
-                keyboardType="numeric"
-                value={renewCost}
-                onChangeText={setRenewCost}
-                placeholderTextColor="#666"
-              />
-            </View>
-
-            <View style={styles.summaryBox}>
-              <Text style={styles.summaryText}>
-                New Expiration: In{" "}
-                {(parseInt(renewWeeks) || 0) +
-                  (luchador.weeksLeft > 0 ? luchador.weeksLeft : 0)}{" "}
-                weeks
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.confirmRenewBtn, { backgroundColor: brandTheme }]}
-              onPress={submitRenewal}
-            >
-              <Text style={styles.confirmRenewText}>SIGN CONTRACT</Text>
-            </TouchableOpacity>
           </BlurView>
         </KeyboardAvoidingView>
       </Modal>
@@ -690,318 +539,245 @@ export default function LuchadorDetailScreen() {
   );
 }
 
-// STYLES
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: "#000" },
+  container: { flex: 1, backgroundColor: "#000" },
   absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
-  navHeader: {
+  navBar: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingTop: 10,
+    zIndex: 50,
+    position: "absolute",
+    top: 50,
+    width: "100%",
   },
   iconBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(0,0,0,0.3)",
     justifyContent: "center",
     alignItems: "center",
   },
-  navTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#FFF",
-    letterSpacing: 1,
-  },
 
-  expiredBanner: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 12,
-    gap: 8,
-    marginHorizontal: 20,
-    marginTop: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  expiredBannerText: { fontWeight: "bold", fontSize: 12 },
-
-  // HERO PROFILE
-  profileHeader: { alignItems: "center", paddingTop: 10, paddingBottom: 20 },
-  avatarContainer: {
+  // HERO SECTION
+  heroContainer: {
+    height: 500,
+    width: width,
     position: "relative",
-    marginBottom: 16,
-    alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-end",
+    marginBottom: 20,
   },
-  avatarGlow: {
+  bigBgText: {
     position: "absolute",
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    opacity: 0.6,
-  },
-  avatarImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.2)",
-  },
-  avatarPlaceholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-  },
-  avatarText: { fontSize: 40, color: "white", fontWeight: "bold" },
-
-  classBadge: {
-    position: "absolute",
-    bottom: -10,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    overflow: "hidden",
-  },
-  classBadgeText: {
-    color: "white",
-    fontSize: 10,
-    fontWeight: "bold",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-
-  name: {
-    fontSize: 32,
+    top: 80,
+    left: -20,
+    fontSize: 120,
     fontWeight: "900",
-    color: "#FFF",
-    textAlign: "center",
-    marginTop: 10,
+    color: "rgba(255,255,255,0.03)",
+    width: width + 100,
+    zIndex: 1,
   },
-  subInfoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 6,
-    gap: 6,
+  imageWrapper: {
+    width: width,
+    height: 500,
+    position: "absolute",
+    bottom: 0,
+    zIndex: 2,
   },
-  miniBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-  },
-  miniBadgeText: {
-    fontSize: 10,
-    fontWeight: "800",
-    textTransform: "uppercase",
-  },
-  subInfoText: {
-    fontSize: 11,
-    color: "#CBD5E1",
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  divider: { color: "#64748B", fontWeight: "100" },
-
-  titlesRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 15, // Más espacio entre títulos
-    marginTop: 20,
-  },
-  titleItem: {
-    alignItems: "center",
-    width: 160,
-  },
-  titleImage: {
-    width: 80,
-    height: 60,
-    marginBottom: 5,
-  },
-  titleLabel: {
-    color: "#F59E0B",
-    fontSize: 12,
-    fontWeight: "bold",
-    textAlign: "center",
+  heroImage: {
     width: "100%",
+    height: "100%",
   },
-  // Fallback pills
-  titlePill: {
-    flexDirection: "row",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    alignItems: "center",
-    gap: 6,
-  },
-  titlePillText: {
-    color: "white",
-    fontSize: 11,
-    fontWeight: "bold",
-    textTransform: "uppercase",
-  },
-  titlePillIcon: { fontSize: 12, color: "white" },
-
-  // SECCIONES (GLASS CARDS)
-  glassCard: {
-    marginHorizontal: 20,
-    marginBottom: 16,
-    borderRadius: 24,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    overflow: "hidden",
-  },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: "900",
-    color: "#94A3B8",
-    marginBottom: 15,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-
-  // STATS
-  statRow: { marginBottom: 12 },
-  statHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-  statLabel: { fontSize: 12, fontWeight: "600", color: "#CBD5E1" },
-  statValue: { fontSize: 12, fontWeight: "bold" },
-  progressBarBg: {
-    height: 4,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    borderRadius: 2,
-  },
-  progressBarFill: { height: "100%", borderRadius: 2 },
-
-  // RECORD
-  recordRow: {
-    flexDirection: "row",
-    gap: 15,
-    marginHorizontal: 20,
-    marginBottom: 16,
-  },
-  recordBox: {
+  placeholderImage: {
     flex: 1,
-    alignItems: "center",
-    padding: 15,
-    borderRadius: 20,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  recordNum: { fontSize: 24, fontWeight: "900" },
-  recordLabel: {
-    fontSize: 10,
-    fontWeight: "bold",
-    letterSpacing: 1,
-    color: "#94A3B8",
-    marginTop: 4,
-  },
-
-  // CONTRATO INFO
-  infoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  infoLabel: {
-    fontSize: 11,
-    color: "#94A3B8",
-    fontWeight: "bold",
-    marginBottom: 4,
-  },
-  infoValue: { fontSize: 15, color: "#FFF", fontWeight: "700" },
-
-  // ACTIONS
-  deleteLink: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 15,
-    marginBottom: 20,
-  },
-  deleteLinkText: { color: "#EF4444", fontWeight: "700", fontSize: 14 },
-
-  // MODAL DARK
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.8)",
-    justifyContent: "center",
-    padding: 20,
-  },
-  modalContent: {
-    borderRadius: 24,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    overflow: "hidden",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  modalTitle: { fontSize: 18, fontWeight: "800", color: "#FFF" },
-  closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.1)",
     justifyContent: "center",
     alignItems: "center",
   },
 
-  inputGroup: { marginBottom: 15 },
-  label: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#94A3B8",
+  infoOverlay: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    zIndex: 10, // Asegura que el texto esté sobre la imagen y el gradiente
+  },
+  roleBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
     marginBottom: 8,
   },
-  input: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+  roleText: { color: "#FFF", fontWeight: "bold", fontSize: 10 },
+  nameText: {
     color: "#FFF",
+    fontSize: 48,
+    fontWeight: "900",
+    lineHeight: 48,
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 10,
+    width: "80%",
+  },
+  classText: {
+    color: "#CBD5E1",
+    fontSize: 14,
     fontWeight: "600",
+    marginTop: 5,
+    textShadowColor: "rgba(0,0,0,1)",
+    textShadowRadius: 5,
   },
-  summaryBox: {
-    backgroundColor: "rgba(59, 130, 246, 0.1)",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 20,
+
+  ovrContainer: {
+    position: "absolute",
+    right: 20,
+    bottom: 30,
+    zIndex: 10,
+  },
+  ovrBlur: {
+    width: 70,
+    height: 70,
+    borderRadius: 20,
+    overflow: "hidden",
+    justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
     borderWidth: 1,
-    borderColor: "rgba(59, 130, 246, 0.3)",
+    borderColor: "rgba(255,255,255,0.2)",
   },
-  summaryText: { color: "#60A5FA", fontWeight: "bold", fontSize: 12 },
-  confirmRenewBtn: {
-    padding: 16,
+  ovrNumber: { color: "#FFF", fontSize: 28, fontWeight: "900" },
+  ovrLabel: { color: "#CBD5E1", fontSize: 10, fontWeight: "bold" },
+
+  // STATS ROW
+  statsRow: {
+    flexDirection: "row",
+    paddingHorizontal: 20,
+    gap: 12,
+    marginBottom: 30,
+  },
+  statItem: {
+    flex: 1,
+    paddingVertical: 15,
     borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
   },
-  confirmRenewText: {
-    color: "white",
+  statValue: { fontSize: 24, fontWeight: "900", color: "#FFF" },
+  statLabel: {
+    fontSize: 10,
     fontWeight: "bold",
-    fontSize: 14,
-    letterSpacing: 1,
+    color: "#94A3B8",
+    marginTop: 2,
   },
+
+  // CONTENT
+  contentSection: { paddingHorizontal: 20 },
+  sectionBlock: { marginBottom: 30 },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#94A3B8",
+    letterSpacing: 1,
+    marginBottom: 15,
+  },
+
+  activeTitlesRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  activeTitleCard: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 10,
+    alignItems: "center",
+    width: 100,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  activeTitleImg: { width: 80, height: 45, marginBottom: 5 },
+  activeTitleName: {
+    color: "#FFF",
+    fontSize: 10,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+
+  trophyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    padding: 10,
+    paddingRight: 15,
+    borderRadius: 12,
+    gap: 10,
+  },
+  trophyImg: { width: 50, height: 30 },
+  trophyName: { color: "#FFF", fontSize: 12, fontWeight: "bold" },
+  trophyDetail: { color: "#64748B", fontSize: 10, fontWeight: "600" },
+  emptyText: { color: "#64748B", fontStyle: "italic" },
+
+  // CONTRACT BOX
+  contractBox: {
+    backgroundColor: "#111",
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#333",
+    marginBottom: 50,
+  },
+  contractHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#333",
+    paddingBottom: 15,
+  },
+  contractTitle: { color: "#FFF", fontWeight: "bold", fontSize: 14 },
+  contractDetails: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+  contractSubLabel: {
+    color: "#64748B",
+    fontSize: 10,
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
+  contractMainValue: { color: "#FFF", fontSize: 16, fontWeight: "bold" },
+
+  btnRow: { flexDirection: "row", gap: 10 },
+  actionBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  btnText: { color: "#FFF", fontWeight: "900", fontSize: 12 },
+
+  // MODAL
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.8)",
+    padding: 20,
+  },
+  modalContent: { borderRadius: 24, padding: 24, overflow: "hidden" },
+  modalTitle: {
+    color: "#FFF",
+    fontSize: 20,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  inputLabel: { color: "#94A3B8", marginBottom: 5, fontWeight: "bold" },
+  input: {
+    backgroundColor: "rgba(255,255,255,0.1)",
+    color: "#FFF",
+    padding: 15,
+    borderRadius: 12,
+    fontSize: 16,
+  },
+  modalBtn: { padding: 15, borderRadius: 12, alignItems: "center" },
+  modalBtnText: { color: "#FFF", fontWeight: "bold" },
 });
